@@ -19,6 +19,23 @@ import { VALID_NOTE_COLORS } from './noteColors';
 const TODO_STORAGE_KEY = 'agendavoce_todo_items_v1';
 const ORGANIZE_STORAGE_KEY = 'agendavoce_organize_items_v1';
 const WIDGET_CONFIG_STORAGE_KEY = 'agendavoce_widget_config_v1';
+const TODO_ORG_UPDATED_AT_KEY = 'agendavoce_todo_org_updated_at_v1';
+
+export function getTodoOrganizeUpdatedAt(): string | null {
+  try {
+    return localStorage.getItem(TODO_ORG_UPDATED_AT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setTodoOrganizeUpdatedAt(isoTimestamp: string): void {
+  try {
+    localStorage.setItem(TODO_ORG_UPDATED_AT_KEY, isoTimestamp);
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export interface TodoBlockMeta {
   key: TodoBlockKey;
@@ -293,40 +310,48 @@ export function saveWidgetConfig(config: WidgetConfig): void {
   }
 }
 
+export interface WidgetSnapshotTodoEntry {
+  id: string;
+  block: TodoBlockKey;
+  text: string;
+  emoji?: string;
+  catId?: string;
+  done: boolean;
+  order: number;
+}
+
+export interface WidgetSnapshotOrganizeEntry {
+  id: string;
+  date: string;
+  phase: DayPhaseKey;
+  text: string;
+  emoji?: string;
+  catId?: string;
+  done: boolean;
+  order: number;
+}
+
 export interface WidgetSnapshotPayload {
   updatedAt: string;
   todayDate: string;
-  todoItems: Array<{
-    id: string;
-    block: TodoBlockKey;
-    text: string;
-    emoji?: string;
-    done: boolean;
-    order: number;
-  }>;
-  organizeItems: Array<{
-    id: string;
-    date: string;
-    phase: DayPhaseKey;
-    text: string;
-    emoji?: string;
-    done: boolean;
-    order: number;
-  }>;
+  todoItems: WidgetSnapshotTodoEntry[];
+  organizeItems: WidgetSnapshotOrganizeEntry[];
 }
 
 export function buildWidgetSnapshotPayload(
   todoItems: TodoNoteItem[],
-  organizeItems: OrganizeNoteItem[]
+  organizeItems: OrganizeNoteItem[],
+  updatedAtOverride?: string
 ): WidgetSnapshotPayload {
   return {
-    updatedAt: new Date().toISOString(),
+    updatedAt: updatedAtOverride || new Date().toISOString(),
     todayDate: toISODate(new Date()),
     todoItems: todoItems.map((t) => ({
       id: t.id,
       block: t.block,
       text: t.text,
       emoji: getWidgetEmojiForNote(t.emoji, t.text, t.block),
+      catId: resolveCatEmoticonId(t.emoji, t.text, t.block),
       done: t.done,
       order: t.order,
     })),
@@ -336,6 +361,7 @@ export function buildWidgetSnapshotPayload(
       phase: o.phase,
       text: o.text,
       emoji: getWidgetEmojiForNote(o.emoji, o.text),
+      catId: resolveCatEmoticonId(o.emoji, o.text),
       done: o.done,
       order: o.order,
     })),
@@ -345,18 +371,108 @@ export function buildWidgetSnapshotPayload(
 export async function syncWidgetSnapshotToServer(
   token: string,
   todoItems: TodoNoteItem[],
-  organizeItems: OrganizeNoteItem[]
-): Promise<boolean> {
+  organizeItems: OrganizeNoteItem[],
+  updatedAtOverride?: string
+): Promise<string | null> {
   try {
+    const payload = buildWidgetSnapshotPayload(todoItems, organizeItems, updatedAtOverride);
     const res = await fetch(`/api/widget/${encodeURIComponent(token)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildWidgetSnapshotPayload(todoItems, organizeItems)),
+      body: JSON.stringify(payload),
     });
-    return res.ok;
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => ({}))) as { updatedAt?: string };
+    return typeof data.updatedAt === 'string' ? data.updatedAt : payload.updatedAt;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export interface RemoteWidgetStateResponse {
+  exists: boolean;
+  updatedAt: string;
+  todayDate: string;
+  todoItems: WidgetSnapshotTodoEntry[];
+  organizeItems: WidgetSnapshotOrganizeEntry[];
+}
+
+export async function fetchWidgetSnapshotStateFromServer(
+  token: string
+): Promise<RemoteWidgetStateResponse | null> {
+  if (!token || !/^[a-zA-Z0-9_-]{12,64}$/.test(token)) return null;
+  try {
+    const res = await fetch(`/api/widget/${encodeURIComponent(token)}/state`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Partial<RemoteWidgetStateResponse>;
+    if (!data || typeof data !== 'object' || !data.exists) return null;
+    return {
+      exists: true,
+      updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : '',
+      todayDate: typeof data.todayDate === 'string' ? data.todayDate : toISODate(new Date()),
+      todoItems: Array.isArray(data.todoItems) ? data.todoItems : [],
+      organizeItems: Array.isArray(data.organizeItems) ? data.organizeItems : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function hydrateTodoItemsFromRemote(
+  remoteItems: WidgetSnapshotTodoEntry[],
+  existingLocal: TodoNoteItem[],
+  fallbackIso: string
+): TodoNoteItem[] {
+  const existingMap = new Map(existingLocal.map((item) => [item.id, item]));
+  return sanitizeTodoItems(
+    remoteItems.map((r, idx) => {
+      const prev = existingMap.get(r.id);
+      return {
+        id: r.id,
+        block: r.block,
+        text: r.text,
+        emoji: r.catId || prev?.emoji || r.emoji,
+        color: 'none',
+        done: Boolean(r.done),
+        order: typeof r.order === 'number' ? r.order : idx,
+        source: prev?.source || 'text',
+        audioMetadata: prev?.audioMetadata,
+        createdAt: prev?.createdAt || fallbackIso,
+        updatedAt: fallbackIso,
+      };
+    })
+  );
+}
+
+export function hydrateOrganizeItemsFromRemote(
+  remoteItems: WidgetSnapshotOrganizeEntry[],
+  existingLocal: OrganizeNoteItem[],
+  fallbackIso: string
+): OrganizeNoteItem[] {
+  const existingMap = new Map(existingLocal.map((item) => [item.id, item]));
+  return sanitizeOrganizeItems(
+    remoteItems.map((r, idx) => {
+      const prev = existingMap.get(r.id);
+      return {
+        id: r.id,
+        date: r.date,
+        phase: r.phase,
+        text: r.text,
+        emoji: r.catId || prev?.emoji || r.emoji,
+        color: 'none',
+        done: Boolean(r.done),
+        order: typeof r.order === 'number' ? r.order : idx,
+        source: prev?.source || 'text',
+        linkedTodoId: prev?.linkedTodoId,
+        audioMetadata: prev?.audioMetadata,
+        createdAt: prev?.createdAt || fallbackIso,
+        updatedAt: fallbackIso,
+      };
+    })
+  );
 }
 
 export function buildScriptableWidgetCode(origin: string, config: WidgetConfig): string {

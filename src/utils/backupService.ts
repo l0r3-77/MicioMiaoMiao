@@ -1,6 +1,10 @@
 import type { OrganizeNoteItem, TodoNoteItem, WidgetConfig } from '../types/dailyTodo';
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
 import type { AppSettings } from './appSettings';
+import {
+  generateAutoBackupToken,
+  isValidAutoBackupToken,
+} from './appSettings';
 import { getAudioClip, saveAudioClip } from './audioStorage';
 import {
   loadWidgetConfig,
@@ -285,6 +289,29 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
           typeof parsedSettings.includeAudioInBackup === 'boolean'
             ? parsedSettings.includeAudioInBackup
             : true,
+        autoNightlyBackupEnabled:
+          typeof parsedSettings.autoNightlyBackupEnabled === 'boolean'
+            ? parsedSettings.autoNightlyBackupEnabled
+            : true,
+        autoNightlyBackupHour:
+          typeof parsedSettings.autoNightlyBackupHour === 'number' &&
+          Number.isInteger(parsedSettings.autoNightlyBackupHour) &&
+          parsedSettings.autoNightlyBackupHour >= 0 &&
+          parsedSettings.autoNightlyBackupHour <= 5
+            ? parsedSettings.autoNightlyBackupHour
+            : 2,
+        autoBackupToken: isValidAutoBackupToken(parsedSettings.autoBackupToken)
+          ? parsedSettings.autoBackupToken
+          : generateAutoBackupToken(),
+        lastAutoBackupDate:
+          typeof parsedSettings.lastAutoBackupDate === 'string' &&
+          /^\d{4}-\d{2}-\d{2}$/.test(parsedSettings.lastAutoBackupDate)
+            ? parsedSettings.lastAutoBackupDate
+            : null,
+        lastAutoBackupAt:
+          typeof parsedSettings.lastAutoBackupAt === 'string'
+            ? parsedSettings.lastAutoBackupAt
+            : null,
       }
     : undefined;
 
@@ -456,3 +483,166 @@ export async function shareBackupToICloudOrFiles(
   });
   return true;
 }
+
+export const AUTO_BACKUP_FILENAME = 'miciomiao-backup-automatico.json';
+
+export function downloadFixedNightlyBackupFile(payload: AgendaVoceBackupPayload): string {
+  const jsonStr = JSON.stringify(payload, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = AUTO_BACKUP_FILENAME;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  return AUTO_BACKUP_FILENAME;
+}
+
+const BACKUP_HANDLE_DB = 'miciomiao_file_handles_v1';
+const BACKUP_HANDLE_STORE = 'handles';
+const BACKUP_HANDLE_KEY = 'nightly_backup_file';
+
+interface WritableHandleLike {
+  write: (data: string) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+interface FileHandleLike {
+  name?: string;
+  createWritable?: () => Promise<WritableHandleLike>;
+  queryPermission?: (opts: { mode: 'readwrite' }) => Promise<string>;
+  requestPermission?: (opts: { mode: 'readwrite' }) => Promise<string>;
+}
+
+function openHandleDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(BACKUP_HANDLE_DB, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(BACKUP_HANDLE_STORE)) {
+        db.createObjectStore(BACKUP_HANDLE_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export function supportsDirectFileOverwritePicker(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function'
+  );
+}
+
+export async function getLinkedAutoBackupFileName(): Promise<string | null> {
+  if (typeof indexedDB === 'undefined') return null;
+  try {
+    const db = await openHandleDb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction(BACKUP_HANDLE_STORE, 'readonly');
+      const req = tx.objectStore(BACKUP_HANDLE_STORE).get(BACKUP_HANDLE_KEY);
+      req.onsuccess = () => {
+        const handle = req.result as FileHandleLike | undefined;
+        resolve(handle?.name || null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function pickLinkedAutoBackupFile(
+  initialPayload?: AgendaVoceBackupPayload
+): Promise<string | null> {
+  if (!supportsDirectFileOverwritePicker()) return null;
+  const picker = (
+    window as unknown as {
+      showSaveFilePicker: (opts: unknown) => Promise<FileHandleLike>;
+    }
+  ).showSaveFilePicker;
+  const handle = await picker({
+    suggestedName: AUTO_BACKUP_FILENAME,
+    types: [
+      {
+        description: 'Backup JSON MicioMiao',
+        accept: { 'application/json': ['.json'] },
+      },
+    ],
+  });
+  const db = await openHandleDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(BACKUP_HANDLE_STORE, 'readwrite');
+    tx.objectStore(BACKUP_HANDLE_STORE).put(handle, BACKUP_HANDLE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  if (initialPayload && handle.createWritable) {
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(initialPayload, null, 2));
+    await writable.close();
+  }
+  return handle.name || AUTO_BACKUP_FILENAME;
+}
+
+export async function clearLinkedAutoBackupFile(): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  try {
+    const db = await openHandleDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(BACKUP_HANDLE_STORE, 'readwrite');
+      tx.objectStore(BACKUP_HANDLE_STORE).delete(BACKUP_HANDLE_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {
+    // ignore
+  }
+}
+
+export async function writeAutoBackupToLinkedFile(
+  payload: AgendaVoceBackupPayload
+): Promise<boolean> {
+  if (typeof indexedDB === 'undefined') return false;
+  try {
+    const db = await openHandleDb();
+    const handle = await new Promise<FileHandleLike | undefined>((resolve) => {
+      const tx = db.transaction(BACKUP_HANDLE_STORE, 'readonly');
+      const req = tx.objectStore(BACKUP_HANDLE_STORE).get(BACKUP_HANDLE_KEY);
+      req.onsuccess = () => resolve(req.result as FileHandleLike | undefined);
+      req.onerror = () => resolve(undefined);
+    });
+    if (!handle || typeof handle.createWritable !== 'function') return false;
+    if (typeof handle.queryPermission === 'function') {
+      const perm = await handle.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') return false;
+    }
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(payload, null, 2));
+    await writable.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function syncNightlyBackupToServer(
+  token: string,
+  payload: AgendaVoceBackupPayload
+): Promise<boolean> {
+  if (!isValidAutoBackupToken(token)) return false;
+  try {
+    const res = await fetch(`/api/backup/${encodeURIComponent(token)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+

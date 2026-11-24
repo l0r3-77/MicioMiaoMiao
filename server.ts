@@ -18,13 +18,57 @@ const WIDGET_STORE_FILES = [
   path.join(QUOTA_CACHE_DIR, 'agendavoce-widgets.json'),
   '/tmp/agendavoce-widgets.json',
 ];
+const BACKUP_STORE_FILES = [
+  path.join(QUOTA_CACHE_DIR, 'miciomiao-backups.json'),
+  '/tmp/miciomiao-backups.json',
+];
 const DEFAULT_FREE_TIER_LIMIT = 20;
+
+const CAT_EMOTICON_IDS = [
+  'cat_note',
+  'cat_happy',
+  'cat_lol',
+  'cat_love',
+  'cat_kiss',
+  'cat_wink',
+  'cat_cool',
+  'cat_star',
+  'cat_party',
+  'cat_think',
+  'cat_wow',
+  'cat_sad',
+  'cat_angry',
+  'cat_sleep',
+  'cat_sick',
+  'cat_hug',
+  'cat_idea',
+  'cat_fire',
+  'cat_bills',
+  'cat_shop',
+  'cat_food',
+  'cat_coffee',
+  'cat_call',
+  'cat_work',
+  'cat_book',
+  'cat_fun',
+  'cat_movie',
+  'cat_game',
+  'cat_sport',
+  'cat_shower',
+  'cat_clean',
+  'cat_health',
+  'cat_car',
+  'cat_home',
+  'cat_gift',
+  'cat_sun',
+];
 
 interface StoredWidgetTodo {
   id: string;
   block: 'poi' | 'svaghi' | 'bollette' | 'poi_poi';
   text: string;
   emoji?: string;
+  catId?: string;
   done: boolean;
   order: number;
 }
@@ -35,6 +79,7 @@ interface StoredWidgetOrganize {
   phase: 'mattina' | 'dopopranzo' | 'pomeriggio' | 'dopocena';
   text: string;
   emoji?: string;
+  catId?: string;
   done: boolean;
   order: number;
 }
@@ -47,6 +92,7 @@ interface StoredWidgetSnapshot {
 }
 
 const widgetStore = new Map<string, StoredWidgetSnapshot>();
+const autoBackupStore = new Map<string, string>();
 
 function loadWidgetStoreFromDisk() {
   for (const filePath of WIDGET_STORE_FILES) {
@@ -89,7 +135,46 @@ function persistWidgetStoreToDisk() {
   }
 }
 
+function loadAutoBackupStoreFromDisk() {
+  for (const filePath of BACKUP_STORE_FILES) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, string>;
+      if (parsed && typeof parsed === 'object') {
+        for (const [token, rawJson] of Object.entries(parsed)) {
+          if (/^[a-zA-Z0-9_-]{24,64}$/.test(token) && typeof rawJson === 'string') {
+            autoBackupStore.set(token, rawJson);
+          }
+        }
+        break;
+      }
+    } catch {
+      // ignore corrupt backup cache
+    }
+  }
+}
+
+function persistAutoBackupStoreToDisk() {
+  const entries = Array.from(autoBackupStore.entries()).slice(-20);
+  const serialized = JSON.stringify(Object.fromEntries(entries));
+  try {
+    if (!fs.existsSync(QUOTA_CACHE_DIR)) {
+      fs.mkdirSync(QUOTA_CACHE_DIR, { recursive: true });
+    }
+  } catch {
+    // ignore mkdir errors
+  }
+  for (const filePath of BACKUP_STORE_FILES) {
+    try {
+      fs.writeFileSync(filePath, serialized);
+    } catch {
+      // ignore disk errors
+    }
+  }
+}
+
 loadWidgetStoreFromDisk();
+loadAutoBackupStoreFromDisk();
 
 const PHASE_TITLES: Record<StoredWidgetOrganize['phase'], string> = {
   mattina: 'Mattina',
@@ -1032,6 +1117,7 @@ async function startServer() {
             block: validBlocks.has(x.block) ? x.block : 'poi',
             text: typeof x.text === 'string' ? x.text.slice(0, 500) : '',
             emoji: typeof x.emoji === 'string' ? x.emoji.slice(0, 12) : '',
+            catId: typeof x.catId === 'string' ? x.catId.slice(0, 32) : '',
             done: Boolean(x.done),
             order: typeof x.order === 'number' ? x.order : idx,
           }))
@@ -1050,6 +1136,7 @@ async function startServer() {
             phase: validPhases.has(x.phase) ? x.phase : 'mattina',
             text: typeof x.text === 'string' ? x.text.slice(0, 500) : '',
             emoji: typeof x.emoji === 'string' ? x.emoji.slice(0, 12) : '',
+            catId: typeof x.catId === 'string' ? x.catId.slice(0, 32) : '',
             done: Boolean(x.done),
             order: typeof x.order === 'number' ? x.order : idx,
           }))
@@ -1069,6 +1156,67 @@ async function startServer() {
     widgetStore.set(token, snapshot);
     persistWidgetStoreToDisk();
     return res.json({ ok: true, updatedAt: snapshot.updatedAt });
+  });
+
+  app.get('/api/widget/:token/state', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const token = String(req.params.token || '');
+    if (!/^[a-zA-Z0-9_-]{12,64}$/.test(token)) {
+      return res.status(400).json({ error: 'Token widget non valido.' });
+    }
+    const snapshot = widgetStore.get(token);
+    if (!snapshot) {
+      return res.json({
+        exists: false,
+        updatedAt: '',
+        todayDate: new Date().toISOString().slice(0, 10),
+        todoItems: [],
+        organizeItems: [],
+      });
+    }
+    return res.json({
+      exists: true,
+      updatedAt: snapshot.updatedAt,
+      todayDate: snapshot.todayDate,
+      todoItems: snapshot.todoItems,
+      organizeItems: snapshot.organizeItems,
+    });
+  });
+
+  app.put('/api/backup/:token', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const token = String(req.params.token || '');
+    if (!/^[a-zA-Z0-9_-]{24,64}$/.test(token)) {
+      return res.status(400).json({ error: 'Token backup non valido.' });
+    }
+    const body = req.body as Record<string, unknown> | undefined;
+    if (!body || typeof body !== 'object' || !Array.isArray(body.dailyNotes)) {
+      return res.status(400).json({ error: 'Payload backup non valido.' });
+    }
+    const serialized = JSON.stringify(body, null, 2);
+    if (serialized.length > 25 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Backup troppo grande per la sincronizzazione automatica.' });
+    }
+    autoBackupStore.set(token, serialized);
+    persistAutoBackupStoreToDisk();
+    return res.json({ ok: true, updatedAt: new Date().toISOString() });
+  });
+
+  app.get('/api/backup/:token', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const token = String(req.params.token || '');
+    if (!/^[a-zA-Z0-9_-]{24,64}$/.test(token)) {
+      return res.status(400).json({ error: 'Token backup non valido.' });
+    }
+    const stored = autoBackupStore.get(token);
+    if (!stored) {
+      return res.status(404).json({
+        error: 'Nessun backup sincronizzato trovato per questo token. Apri MicioMiao almeno una volta dopo aver attivato il backup notturno.',
+      });
+    }
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="miciomiao-backup-automatico.json"');
+    return res.send(stored);
   });
 
   app.get('/api/widget/:token', (req, res) => {
@@ -1256,24 +1404,7 @@ async function startServer() {
         });
       }
 
-      const catEmoticonIds = [
-        'cat_note',
-        'cat_happy',
-        'cat_love',
-        'cat_idea',
-        'cat_bills',
-        'cat_shop',
-        'cat_call',
-        'cat_work',
-        'cat_coffee',
-        'cat_fun',
-        'cat_sport',
-        'cat_clean',
-        'cat_health',
-        'cat_car',
-        'cat_gift',
-        'cat_sleep',
-      ];
+      const catEmoticonIds = CAT_EMOTICON_IDS;
 
       let lastErr: unknown;
       for (const model of models) {
@@ -1373,24 +1504,7 @@ async function startServer() {
         });
       }
 
-      const catEmoticonIds = [
-        'cat_note',
-        'cat_happy',
-        'cat_love',
-        'cat_idea',
-        'cat_bills',
-        'cat_shop',
-        'cat_call',
-        'cat_work',
-        'cat_coffee',
-        'cat_fun',
-        'cat_sport',
-        'cat_clean',
-        'cat_health',
-        'cat_car',
-        'cat_gift',
-        'cat_sleep',
-      ];
+      const catEmoticonIds = CAT_EMOTICON_IDS;
 
       const numberedLines = fallbackLines.map((line, i) => `${i}: ${line}`).join('\n');
 

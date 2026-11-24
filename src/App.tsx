@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
   Bell,
@@ -41,17 +41,27 @@ import type { AgendaViewMode, DailyNote, NoteColor, NoteEntry } from './types/no
 import { loadAppSettings, saveAppSettings, type AppSettings } from './utils/appSettings';
 import { deleteAudioClip } from './utils/audioStorage';
 import {
+  fetchWidgetSnapshotStateFromServer,
+  getTodoOrganizeUpdatedAt,
+  hydrateOrganizeItemsFromRemote,
+  hydrateTodoItemsFromRemote,
   loadOrganizeItems,
   loadTodoItems,
   loadWidgetConfig,
   saveOrganizeItems,
   saveTodoItems,
   saveWidgetConfig,
+  setTodoOrganizeUpdatedAt,
   syncWidgetSnapshotToServer,
 } from './utils/dailyTodoStorage';
 import {
+  AUTO_BACKUP_FILENAME,
+  buildBackupPayload,
+  downloadFixedNightlyBackupFile,
   mergeDailyNotesFromBackup,
   restoreAudioClipsFromBackup,
+  syncNightlyBackupToServer,
+  writeAutoBackupToLinkedFile,
   type AgendaVoceBackupPayload,
 } from './utils/backupService';
 import { formatItalianDateShort, getCurrentTimeHHMM, toISODate } from './utils/dateUtils';
@@ -64,7 +74,11 @@ import {
   type LayoutSectionKey,
   type SectionLayoutState,
 } from './utils/layoutPreferences';
-import { getCompanionQuoteForDate } from './utils/dailyCompanionQuotes';
+import {
+  getCompanionQuoteForDate,
+  getInitialLaunchQuoteOffset,
+  saveManualQuoteOffset,
+} from './utils/dailyCompanionQuotes';
 import { NOTE_COLOR_LIST, NOTE_COLORS, VALID_NOTE_COLORS } from './utils/noteColors';
 import { CHIBI_CAT_MASCOTS } from './utils/nekoCatalog';
 import { publishQuotaSnapshot } from './utils/quotaTracker';
@@ -243,7 +257,13 @@ function dailyNoteMatchesFilters(
 export default function App() {
   const initialUrlParams = useMemo(() => {
     if (typeof window === 'undefined') {
-      return { isWidget: false, section: null as string | null, source: null as WidgetSourceKey | null, size: null as WidgetSizePreset | null };
+      return {
+        isWidget: false,
+        section: null as string | null,
+        source: null as WidgetSourceKey | null,
+        size: null as WidgetSizePreset | null,
+        token: null as string | null,
+      };
     }
     const params = new URLSearchParams(window.location.search);
     const rawSource = params.get('source');
@@ -258,11 +278,15 @@ export default function App() {
     const rawSize = params.get('size');
     const validSize: WidgetSizePreset | null =
       rawSize === 'small' || rawSize === 'medium' || rawSize === 'large' ? rawSize : null;
+    const rawToken = params.get('token');
+    const validToken =
+      rawToken && /^[a-zA-Z0-9_-]{12,64}$/.test(rawToken) ? rawToken : null;
     return {
       isWidget: params.get('widget') === '1',
       section: params.get('section'),
       source: validSource,
       size: validSize,
+      token: validToken,
     };
   }, []);
 
@@ -276,7 +300,13 @@ export default function App() {
   const [dailyNotes, setDailyNotes] = useState<DailyNote[]>(loadStoredDailyNotes);
   const [todoItems, setTodoItems] = useState<TodoNoteItem[]>(loadTodoItems);
   const [organizeItems, setOrganizeItems] = useState<OrganizeNoteItem[]>(loadOrganizeItems);
-  const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>(loadWidgetConfig);
+  const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>(() => {
+    const base = loadWidgetConfig();
+    if (initialUrlParams.token && initialUrlParams.isWidget) {
+      return { ...base, token: initialUrlParams.token };
+    }
+    return base;
+  });
   const [widgetSyncStatus, setWidgetSyncStatus] = useState<
     'idle' | 'syncing' | 'synced' | 'error'
   >('idle');
@@ -303,8 +333,23 @@ export default function App() {
     dailyNote: DailyNote;
     entry: NoteEntry;
   } | null>(null);
-  const [quoteOffset, setQuoteOffset] = useState(0);
+  const [quoteOffset, setQuoteOffset] = useState<number>(() =>
+    getInitialLaunchQuoteOffset(toISODate(new Date()))
+  );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const activeWidgetToken =
+    (isWidgetStandalone && initialUrlParams.token) || widgetConfig.token;
+  const hasInitialWidgetHydratedRef = useRef(false);
+  const isApplyingRemoteWidgetRef = useRef(false);
+  const didFirstTodoOrgPersistRef = useRef(false);
+  const localTodoOrgUpdatedAtRef = useRef<string>(getTodoOrganizeUpdatedAt() || '');
+  const todoItemsRef = useRef(todoItems);
+  todoItemsRef.current = todoItems;
+  const organizeItemsRef = useRef(organizeItems);
+  organizeItemsRef.current = organizeItems;
+  const hiddenAtRef = useRef<number | null>(null);
+  const autoBackupRunningRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -323,31 +368,254 @@ export default function App() {
   }, [organizeItems]);
 
   useEffect(() => {
+    if (!didFirstTodoOrgPersistRef.current) {
+      didFirstTodoOrgPersistRef.current = true;
+      return;
+    }
+    if (isApplyingRemoteWidgetRef.current) return;
+    const nowIso = new Date().toISOString();
+    localTodoOrgUpdatedAtRef.current = nowIso;
+    setTodoOrganizeUpdatedAt(nowIso);
+  }, [todoItems, organizeItems]);
+
+  useEffect(() => {
     saveWidgetConfig(widgetConfig);
   }, [widgetConfig]);
 
+  const pullRemoteWidgetState = useCallback(
+    async (forceAdoptIfEmpty = false) => {
+      if (!activeWidgetToken) return;
+      setWidgetSyncStatus('syncing');
+      const remote = await fetchWidgetSnapshotStateFromServer(activeWidgetToken);
+      if (!remote) {
+        setWidgetSyncStatus((prev) => (prev === 'syncing' ? 'synced' : prev));
+        return;
+      }
+      const localTs = localTodoOrgUpdatedAtRef.current;
+      const isLocalEmpty =
+        todoItemsRef.current.length === 0 && organizeItemsRef.current.length === 0;
+      const shouldAdopt =
+        remote.exists &&
+        (remote.updatedAt > localTs || (forceAdoptIfEmpty && isLocalEmpty));
+
+      if (shouldAdopt) {
+        const nowIso = remote.updatedAt || new Date().toISOString();
+        isApplyingRemoteWidgetRef.current = true;
+        localTodoOrgUpdatedAtRef.current = nowIso;
+        setTodoOrganizeUpdatedAt(nowIso);
+        setTodoItems(
+          hydrateTodoItemsFromRemote(remote.todoItems, todoItemsRef.current, nowIso)
+        );
+        setOrganizeItems(
+          hydrateOrganizeItemsFromRemote(remote.organizeItems, organizeItemsRef.current, nowIso)
+        );
+        window.setTimeout(() => {
+          isApplyingRemoteWidgetRef.current = false;
+        }, 0);
+      }
+      setWidgetSyncStatus('synced');
+      setWidgetLastSyncedAt(getCurrentTimeHHMM());
+    },
+    [activeWidgetToken]
+  );
+
+  // Initial pull before allowing PUT push so standalone WebClip never clobbers real tasks
   useEffect(() => {
+    let active = true;
+    hasInitialWidgetHydratedRef.current = false;
+    (async () => {
+      await pullRemoteWidgetState(true);
+      if (!active) return;
+      hasInitialWidgetHydratedRef.current = true;
+    })();
+    return () => {
+      active = false;
+    };
+  }, [pullRemoteWidgetState]);
+
+  // Push local Todo/Organize changes to widget endpoint after initial hydration
+  useEffect(() => {
+    if (!hasInitialWidgetHydratedRef.current) return;
+    if (isApplyingRemoteWidgetRef.current) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       setWidgetSyncStatus('syncing');
-      const ok = await syncWidgetSnapshotToServer(
-        widgetConfig.token,
+      const syncedIso = await syncWidgetSnapshotToServer(
+        activeWidgetToken,
         todoItems,
-        organizeItems
+        organizeItems,
+        localTodoOrgUpdatedAtRef.current || undefined
       );
       if (cancelled) return;
-      if (ok) {
+      if (syncedIso) {
+        localTodoOrgUpdatedAtRef.current = syncedIso;
+        setTodoOrganizeUpdatedAt(syncedIso);
         setWidgetSyncStatus('synced');
         setWidgetLastSyncedAt(getCurrentTimeHHMM());
       } else {
         setWidgetSyncStatus('error');
       }
-    }, 350);
+    }, 300);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [widgetConfig.token, todoItems, organizeItems]);
+  }, [activeWidgetToken, todoItems, organizeItems]);
+
+  // Pull widget state when returning to foreground / focus, plus poll in standalone widget
+  useEffect(() => {
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void pullRemoteWidgetState(isWidgetStandalone);
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    let intervalId: number | undefined;
+    if (isWidgetStandalone) {
+      intervalId = window.setInterval(() => {
+        void pullRemoteWidgetState(true);
+      }, 15000);
+    }
+    return () => {
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [isWidgetStandalone, pullRemoteWidgetState]);
+
+  // Refresh companion quote also when resuming iOS PWA after being backgrounded (>= 30s)
+  useEffect(() => {
+    const onVisChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now();
+      } else if (document.visibilityState === 'visible' && hiddenAtRef.current !== null) {
+        const elapsedMs = Date.now() - hiddenAtRef.current;
+        hiddenAtRef.current = null;
+        if (elapsedMs >= 30000) {
+          const today = toISODate(new Date());
+          setQuoteOffset((prev) => {
+            const next = prev + 1;
+            saveManualQuoteOffset(today, next);
+            return next;
+          });
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => document.removeEventListener('visibilitychange', onVisChange);
+  }, []);
+
+  // Debounced sync of full backup JSON to server for autonomous iPhone nightly Shortcuts overwrite
+  useEffect(() => {
+    if (isWidgetStandalone) return;
+    if (!settings.autoNightlyBackupEnabled || !settings.autoBackupToken) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const payload = await buildBackupPayload(
+          dailyNotes,
+          layouts,
+          settings.includeAudioInBackup,
+          todoItems,
+          organizeItems,
+          settings,
+          widgetConfig
+        );
+        if (!cancelled) {
+          await syncNightlyBackupToServer(settings.autoBackupToken, payload);
+        }
+      } catch {
+        // ignore background sync errors
+      }
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    isWidgetStandalone,
+    settings.autoNightlyBackupEnabled,
+    settings.autoBackupToken,
+    settings.includeAudioInBackup,
+    dailyNotes,
+    todoItems,
+    organizeItems,
+    layouts,
+    widgetConfig,
+  ]);
+
+  // Automatic nightly backup check when app is open/opened past configured night hour
+  useEffect(() => {
+    if (isWidgetStandalone) return;
+    if (!settings.autoNightlyBackupEnabled) return;
+
+    const checkAndRunNightlyBackup = async () => {
+      if (autoBackupRunningRef.current) return;
+      const now = new Date();
+      const todayIso = toISODate(now);
+      if (settings.lastAutoBackupDate === todayIso) return;
+      if (now.getHours() < settings.autoNightlyBackupHour) return;
+      const hasAnyData =
+        dailyNotes.length > 0 || todoItems.length > 0 || organizeItems.length > 0;
+      if (!hasAnyData) return;
+
+      autoBackupRunningRef.current = true;
+      try {
+        const payload = await buildBackupPayload(
+          dailyNotes,
+          layouts,
+          settings.includeAudioInBackup,
+          todoItems,
+          organizeItems,
+          settings,
+          widgetConfig
+        );
+        await syncNightlyBackupToServer(settings.autoBackupToken, payload);
+        const overwrote = await writeAutoBackupToLinkedFile(payload);
+        if (!overwrote) {
+          downloadFixedNightlyBackupFile(payload);
+        }
+        setSettings((prev) => ({
+          ...prev,
+          lastAutoBackupDate: todayIso,
+          lastAutoBackupAt: now.toISOString(),
+        }));
+        setToastMessage(
+          overwrote
+            ? `Backup notturno aggiornato (${AUTO_BACKUP_FILENAME})`
+            : `Backup notturno salvato (${AUTO_BACKUP_FILENAME})`
+        );
+      } catch {
+        // ignore silent failure
+      } finally {
+        autoBackupRunningRef.current = false;
+      }
+    };
+
+    const initialTimer = window.setTimeout(() => {
+      void checkAndRunNightlyBackup();
+    }, 3500);
+    const periodicTimer = window.setInterval(() => {
+      void checkAndRunNightlyBackup();
+    }, 5 * 60 * 1000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(periodicTimer);
+    };
+  }, [
+    isWidgetStandalone,
+    settings.autoNightlyBackupEnabled,
+    settings.autoNightlyBackupHour,
+    settings.lastAutoBackupDate,
+    settings.autoBackupToken,
+    settings.includeAudioInBackup,
+    dailyNotes,
+    todoItems,
+    organizeItems,
+    layouts,
+    widgetConfig,
+  ]);
 
   useEffect(() => {
     saveAllLayoutPreferences(layouts);
@@ -836,12 +1104,15 @@ export default function App() {
 
   const handleForceSyncWidget = async () => {
     setWidgetSyncStatus('syncing');
-    const ok = await syncWidgetSnapshotToServer(
-      widgetConfig.token,
+    const syncedIso = await syncWidgetSnapshotToServer(
+      activeWidgetToken,
       todoItems,
-      organizeItems
+      organizeItems,
+      localTodoOrgUpdatedAtRef.current || undefined
     );
-    if (ok) {
+    if (syncedIso) {
+      localTodoOrgUpdatedAtRef.current = syncedIso;
+      setTodoOrganizeUpdatedAt(syncedIso);
       setWidgetSyncStatus('synced');
       setWidgetLastSyncedAt(getCurrentTimeHHMM());
       setToastMessage('Widget iPhone sincronizzato');
@@ -908,7 +1179,13 @@ export default function App() {
             </div>
             <button
               type="button"
-              onClick={() => setQuoteOffset((prev) => prev + 1)}
+              onClick={() =>
+                setQuoteOffset((prev) => {
+                  const next = prev + 1;
+                  saveManualQuoteOffset(selectedDate, next);
+                  return next;
+                })
+              }
               aria-label="Mostra un'altra frase del giorno"
               className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-purple-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-stone-700 hover:border-purple-300 hover:text-stone-900 transition-colors whitespace-nowrap shrink-0"
             >
@@ -1073,12 +1350,24 @@ export default function App() {
   if (isWidgetStandalone) {
     const activeWidgetSource = standaloneSource || widgetConfig.source;
     const activeWidgetSize = standaloneSize || widgetConfig.size;
+    const standaloneUrl =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/?widget=1&token=${encodeURIComponent(
+            activeWidgetToken
+          )}&source=${encodeURIComponent(activeWidgetSource)}&size=${encodeURIComponent(
+            activeWidgetSize
+          )}`
+        : '';
     return (
       <StandaloneIPhoneWidgetView
         source={activeWidgetSource}
         size={activeWidgetSize}
+        widgetUrl={standaloneUrl}
+        syncStatus={widgetSyncStatus}
+        lastSyncedAt={widgetLastSyncedAt}
         todoItems={todoItems}
         organizeItems={organizeItems}
+        onRefreshSync={() => void pullRemoteWidgetState(true)}
         onToggleTodoDone={(id) =>
           setTodoItems((prev) =>
             prev.map((item) =>

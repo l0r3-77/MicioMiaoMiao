@@ -593,27 +593,39 @@ export const IPhoneWidgetStudio: React.FC<IPhoneWidgetStudioProps> = ({
 interface StandaloneIPhoneWidgetViewProps {
   source: WidgetSourceKey;
   size: WidgetSizePreset;
+  widgetUrl?: string;
+  syncStatus?: 'idle' | 'syncing' | 'synced' | 'error';
+  lastSyncedAt?: string | null;
   todoItems: TodoNoteItem[];
   organizeItems: OrganizeNoteItem[];
   onToggleTodoDone: (id: string) => void;
   onToggleOrganizeDone: (id: string) => void;
+  onRefreshSync?: () => void;
   onOpenFullApp: () => void;
 }
 
 export const StandaloneIPhoneWidgetView: React.FC<StandaloneIPhoneWidgetViewProps> = ({
   source,
   size,
+  widgetUrl,
+  syncStatus = 'idle',
+  lastSyncedAt = null,
   todoItems,
   organizeItems,
   onToggleTodoDone,
   onToggleOrganizeDone,
+  onRefreshSync,
   onOpenFullApp,
 }) => {
   const todayIso = toISODate(new Date());
   const isToday = source === 'today';
   const phaseOrder = new Map(DAY_PHASES.map((p, idx) => [p.key, idx]));
-  const { isInstallable, isInstalled, install } = usePWAInstall();
-  const [homeHint, setHomeHint] = useState(false);
+  const { isInstallable, install } = usePWAInstall();
+  const [saveDrawerOpen, setSaveDrawerOpen] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+
+  const effectiveUrl =
+    widgetUrl || (typeof window !== 'undefined' ? window.location.href : '');
 
   const items = useMemo(() => {
     if (isToday) {
@@ -657,9 +669,20 @@ export const StandaloneIPhoneWidgetView: React.FC<StandaloneIPhoneWidgetViewProp
     : TODO_BLOCK_MAP[source].title;
 
   const maxWidthClass =
-    size === 'small' ? 'max-w-[260px]' : size === 'medium' ? 'max-w-md' : 'max-w-lg';
+    size === 'small' ? 'max-w-[270px]' : size === 'medium' ? 'max-w-md' : 'max-w-lg';
 
-  const handlePinWidgetToHome = async () => {
+  const handleCopyWidgetUrl = async () => {
+    if (!effectiveUrl) return;
+    try {
+      await navigator.clipboard.writeText(effectiveUrl);
+      setUrlCopied(true);
+      window.setTimeout(() => setUrlCopied(false), 2400);
+    } catch {
+      // ignore; input remains selectable
+    }
+  };
+
+  const handleShareWidgetUrl = async () => {
     if (isInstallable) {
       const ok = await install();
       if (ok) return;
@@ -668,14 +691,14 @@ export const StandaloneIPhoneWidgetView: React.FC<StandaloneIPhoneWidgetViewProp
       try {
         await navigator.share({
           title: `${title} · MicioMiao`,
-          url: window.location.href,
+          url: effectiveUrl,
         });
         return;
       } catch {
-        // user dismissed or unsupported; fall back to crisp inline guide
+        // dismissed or unsupported
       }
     }
-    setHomeHint((v) => !v);
+    await handleCopyWidgetUrl();
   };
 
   return (
@@ -686,21 +709,48 @@ export const StandaloneIPhoneWidgetView: React.FC<StandaloneIPhoneWidgetViewProp
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#B6E6DD] pb-2">
           <div className="min-w-0">
             <h1 className="text-sm font-bold text-[#083B37] truncate">{title}</h1>
-            <p className="text-[10.5px] font-medium text-[#0E645D]">
-              {isToday ? 'MicioMiao' : 'MicioMiao · Da Fare'}
+            <p className="text-[10.5px] font-medium text-[#0E645D] flex items-center gap-1.5">
+              <span>{isToday ? 'MicioMiao' : 'MicioMiao · Da Fare'}</span>
+              <span>·</span>
+              <span>
+                {syncStatus === 'syncing'
+                  ? 'Sincronizzo...'
+                  : syncStatus === 'error'
+                    ? 'Offline'
+                    : lastSyncedAt
+                      ? `Sinc. ${lastSyncedAt}`
+                      : 'Sincronizzato'}
+              </span>
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {!isInstalled && (
+            {onRefreshSync && (
               <button
                 type="button"
-                onClick={handlePinWidgetToHome}
-                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[#74C4B6] bg-[#D8F4EE] px-2.5 py-1 text-[11px] font-semibold text-[#083B37] hover:bg-[#BEECE1] whitespace-nowrap"
+                onClick={onRefreshSync}
+                aria-label="Aggiorna note dal server"
+                title="Aggiorna sincronizzazione"
+                className="min-h-[34px] w-[34px] inline-flex items-center justify-center rounded-xl border border-[#74C4B6] bg-[#EDFBF8] text-[#0B534D] hover:bg-[#D8F4EE]"
               >
-                <Home className="h-3 w-3 text-[#0F766E]" aria-hidden="true" />
-                <span>In Home</span>
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`}
+                  aria-hidden="true"
+                />
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setSaveDrawerOpen((v) => !v)}
+              aria-expanded={saveDrawerOpen}
+              className={`min-h-[34px] inline-flex items-center gap-1 rounded-xl border px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                saveDrawerOpen
+                  ? 'border-[#0B5B53] bg-[#0B5B53] text-white'
+                  : 'border-[#74C4B6] bg-[#D8F4EE] text-[#083B37] hover:bg-[#BEECE1]'
+              }`}
+            >
+              <Share className="h-3 w-3" aria-hidden="true" />
+              <span>Salva</span>
+            </button>
             <button
               type="button"
               onClick={onOpenFullApp}
@@ -711,10 +761,58 @@ export const StandaloneIPhoneWidgetView: React.FC<StandaloneIPhoneWidgetViewProp
           </div>
         </div>
 
-        {homeHint && (
-          <div className="rounded-xl border border-[#7ECBBF] bg-[#E5F9F4] px-2.5 py-2 text-[11px] text-[#083B37] leading-snug">
-            Tocca <strong>Condividi (□↑)</strong> nel browser e seleziona{' '}
-            <strong>Aggiungi alla schermata Home</strong> per avere questo widget sempre pronto.
+        {saveDrawerOpen && (
+          <div className="rounded-2xl border border-[#7ECBBF] bg-[#E5F9F4] p-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-bold text-[#083B37]">
+                Link diretto per Home iPhone
+              </p>
+              <button
+                type="button"
+                onClick={() => setSaveDrawerOpen(false)}
+                aria-label="Chiudi pannello link"
+                className="h-6 w-6 flex items-center justify-center rounded-lg text-[#0B534D] hover:bg-[#C4EFE6]"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              readOnly
+              value={effectiveUrl}
+              onClick={(e) => e.currentTarget.select()}
+              aria-label="URL del widget"
+              className="w-full min-h-[36px] rounded-xl border border-[#7ECBBF] bg-[#F7FEFC] px-2.5 py-1 font-mono text-base sm:text-[11px] text-[#083B37] focus:border-[#0E8A7E] focus:outline-none"
+            />
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={handleCopyWidgetUrl}
+                className="min-h-[34px] inline-flex items-center justify-center gap-1 rounded-xl border border-[#74C4B6] bg-[#F7FEFC] px-2.5 py-1 text-[11px] font-semibold text-[#083B37] hover:bg-[#D8F4EE]"
+              >
+                {urlCopied ? (
+                  <Check className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+                )}
+                <span>{urlCopied ? 'URL copiata!' : 'Copia URL'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleShareWidgetUrl}
+                className="min-h-[34px] inline-flex items-center justify-center gap-1 rounded-xl bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] px-2.5 py-1 text-[11px] font-semibold text-white hover:from-[#0C786E] hover:to-[#08443E]"
+              >
+                <Home className="h-3.5 w-3.5 text-[#99F6E4]" aria-hidden="true" />
+                <span>Condividi / Home</span>
+              </button>
+            </div>
+
+            <p className="text-[10.5px] text-[#0B534D] leading-snug">
+              Copia questa URL e aprila in <strong>Safari</strong>, poi tocca{' '}
+              <strong>Condividi (□↑) → Aggiungi alla schermata Home</strong>.
+            </p>
           </div>
         )}
 
@@ -723,7 +821,7 @@ export const StandaloneIPhoneWidgetView: React.FC<StandaloneIPhoneWidgetViewProp
             Nessuna nota presente al momento.
           </p>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {items.map((item) => (
               <React.Fragment key={item.id}>
                 {item.phaseLabel ? (
@@ -738,14 +836,19 @@ export const StandaloneIPhoneWidgetView: React.FC<StandaloneIPhoneWidgetViewProp
                       ? onToggleTodoDone(item.id)
                       : onToggleOrganizeDone(item.id)
                   }
-                  className="w-full text-left flex items-center gap-2 rounded-lg border border-[#9BDCD1] bg-[#EDFBF8]/90 px-2.5 py-1 hover:border-[#0E8A7E] transition-colors"
+                  className="w-full text-left flex items-center gap-2 rounded-lg border border-[#9BDCD1] bg-[#EDFBF8]/90 px-2.5 py-2 hover:border-[#0E8A7E] transition-colors"
                 >
                   {item.done ? (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-[#0F766E] shrink-0" />
+                    <CheckCircle2 className="h-4 w-4 text-[#0F766E] shrink-0" />
                   ) : (
-                    <Circle className="h-3.5 w-3.5 text-[#68B9AD] shrink-0" />
+                    <Circle className="h-4 w-4 text-[#68B9AD] shrink-0" />
                   )}
-                  <CatEmoticonIcon emoticonId={item.emoji} text={item.text} sizeClass="h-4 w-4" />
+                  <CatEmoticonIcon
+                    emoticonId={item.emoji}
+                    text={item.text}
+                    variant={isToday ? 'medallion' : 'fullFace'}
+                    sizeClass="h-5 w-5"
+                  />
                   <span
                     className={`text-xs font-medium text-[#072C29] flex-1 leading-tight ${
                       item.done ? 'line-through opacity-55' : ''

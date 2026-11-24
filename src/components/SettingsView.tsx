@@ -1,8 +1,12 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   Bell,
+  Check,
+  Clock,
+  Copy,
   Download,
+  FileCheck2,
   HardDrive,
   RotateCcw,
   Settings,
@@ -14,10 +18,18 @@ import type { OrganizeNoteItem, TodoNoteItem, WidgetConfig } from '../types/dail
 import type { DailyNote } from '../types/note';
 import type { AppSettings } from '../utils/appSettings';
 import {
+  AUTO_BACKUP_FILENAME,
   buildBackupPayload,
+  clearLinkedAutoBackupFile,
   downloadBackupJsonFile,
+  downloadFixedNightlyBackupFile,
+  getLinkedAutoBackupFileName,
+  pickLinkedAutoBackupFile,
   shareBackupToICloudOrFiles,
+  supportsDirectFileOverwritePicker,
+  syncNightlyBackupToServer,
   validateAndParseBackupJson,
+  writeAutoBackupToLinkedFile,
   type AgendaVoceBackupPayload,
 } from '../utils/backupService';
 import type {
@@ -80,11 +92,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [pendingModal, setPendingModal] = useState<PendingModal | null>(null);
   const [restoreInProgress, setRestoreInProgress] = useState(false);
+  const [linkedFileName, setLinkedFileName] = useState<string | null>(null);
+  const [autoUrlCopied, setAutoUrlCopied] = useState(false);
 
   const neko = CHIBI_CAT_MASCOTS.zen;
   const totalEntriesCount = dailyNotes.reduce((acc, d) => acc + d.entries.length, 0);
   const canShareFiles =
     typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  const canPickDirectFile = supportsDirectFileOverwritePicker();
+  const autoBackupUrl =
+    typeof window !== 'undefined' && settings.autoBackupToken
+      ? `${window.location.origin}/api/backup/${encodeURIComponent(settings.autoBackupToken)}`
+      : '';
+
+  useEffect(() => {
+    let mounted = true;
+    getLinkedAutoBackupFileName().then((name) => {
+      if (mounted) setLinkedFileName(name);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
 
   const handleDownloadJsonBackup = async () => {
@@ -173,6 +202,98 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setPendingModal(null);
     } finally {
       setRestoreInProgress(false);
+    }
+  };
+
+  const handleRunNightlyBackupNow = async () => {
+    setSettingsError(null);
+    setLocalActionLoading(true);
+    try {
+      const payload = await buildBackupPayload(
+        dailyNotes,
+        layouts,
+        settings.includeAudioInBackup,
+        todoItems,
+        organizeItems,
+        settings,
+        widgetConfig
+      );
+      await syncNightlyBackupToServer(settings.autoBackupToken, payload);
+      const overwroteLinked = await writeAutoBackupToLinkedFile(payload);
+      if (!overwroteLinked) {
+        downloadFixedNightlyBackupFile(payload);
+      }
+      const now = new Date();
+      const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+        2,
+        '0'
+      )}-${String(now.getDate()).padStart(2, '0')}`;
+      onUpdateSettings({
+        lastAutoBackupDate: todayIso,
+        lastAutoBackupAt: now.toISOString(),
+      });
+      onNotify(
+        overwroteLinked
+          ? `File «${linkedFileName || AUTO_BACKUP_FILENAME}» aggiornato e sostituito`
+          : `Backup automatico scaricato (${AUTO_BACKUP_FILENAME})`
+      );
+    } catch (err) {
+      setSettingsError(
+        err instanceof Error ? err.message : 'Errore nel salvataggio automatico del backup.'
+      );
+    } finally {
+      setLocalActionLoading(false);
+    }
+  };
+
+  const handleLinkLocalAutoFile = async () => {
+    setSettingsError(null);
+    setLocalActionLoading(true);
+    try {
+      const payload = await buildBackupPayload(
+        dailyNotes,
+        layouts,
+        settings.includeAudioInBackup,
+        todoItems,
+        organizeItems,
+        settings,
+        widgetConfig
+      );
+      const chosen = await pickLinkedAutoBackupFile(payload);
+      if (chosen) {
+        setLinkedFileName(chosen);
+        onNotify(`File collegato: ${chosen} verrà sostituito automaticamente`);
+      }
+    } catch (err) {
+      if ((err as { name?: string })?.name !== 'AbortError') {
+        setSettingsError(
+          err instanceof Error ? err.message : 'Impossibile collegare il file locale.'
+        );
+      }
+    } finally {
+      setLocalActionLoading(false);
+    }
+  };
+
+  const handleCopyAutoBackupUrl = async () => {
+    if (!autoBackupUrl) return;
+    try {
+      const payload = await buildBackupPayload(
+        dailyNotes,
+        layouts,
+        settings.includeAudioInBackup,
+        todoItems,
+        organizeItems,
+        settings,
+        widgetConfig
+      );
+      await syncNightlyBackupToServer(settings.autoBackupToken, payload);
+      await navigator.clipboard.writeText(autoBackupUrl);
+      setAutoUrlCopied(true);
+      window.setTimeout(() => setAutoUrlCopied(false), 2600);
+      onNotify('URL backup notturno copiato negli appunti');
+    } catch {
+      setSettingsError('Copia il link direttamente dal riquadro qui sotto.');
     }
   };
 
@@ -266,6 +387,174 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 }`}
               />
             </button>
+          </div>
+
+          {/* Automatic Nightly Backup to iOS Files (Replaces previous file) */}
+          <div className="rounded-2xl border border-purple-200/80 bg-purple-50/45 p-3.5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <Clock className="h-4 w-4 text-purple-700 mt-0.5 shrink-0" aria-hidden="true" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-stone-900">
+                    Backup automatico notturno su File (iOS)
+                  </p>
+                  <p className="text-[11px] text-stone-600 mt-0.5 leading-snug">
+                    Genera sempre lo stesso file <span className="font-mono">{AUTO_BACKUP_FILENAME}</span>{' '}
+                    sostituendo quello della notte precedente.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.autoNightlyBackupEnabled}
+                onClick={() =>
+                  onUpdateSettings({
+                    autoNightlyBackupEnabled: !settings.autoNightlyBackupEnabled,
+                  })
+                }
+                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
+                  settings.autoNightlyBackupEnabled ? 'bg-purple-600' : 'bg-stone-300'
+                }`}
+              >
+                <span className="sr-only">Attiva backup automatico notturno</span>
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${
+                    settings.autoNightlyBackupEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {settings.autoNightlyBackupEnabled && (
+              <div className="space-y-2.5 pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-purple-200/70 bg-white/90 px-3 py-2">
+                  <label
+                    htmlFor="nightly-backup-hour"
+                    className="text-xs font-semibold text-stone-800"
+                  >
+                    Orario notturno automatico
+                  </label>
+                  <select
+                    id="nightly-backup-hour"
+                    value={settings.autoNightlyBackupHour}
+                    onChange={(e) =>
+                      onUpdateSettings({ autoNightlyBackupHour: Number(e.target.value) })
+                    }
+                    className="min-h-[34px] rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-base sm:text-xs font-semibold text-stone-900"
+                  >
+                    {[0, 1, 2, 3, 4, 5].map((h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, '0')}:00
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-stone-600 px-0.5">
+                  <span>
+                    Ultimo automatico:{' '}
+                    <strong className="text-stone-800">
+                      {settings.lastAutoBackupAt
+                        ? new Date(settings.lastAutoBackupAt).toLocaleString('it-IT', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : 'Mai eseguito'}
+                    </strong>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={localActionLoading}
+                    onClick={handleRunNightlyBackupNow}
+                    className="min-h-[32px] inline-flex items-center gap-1 rounded-lg bg-stone-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+                  >
+                    <Download className="h-3 w-3 text-purple-300" aria-hidden="true" />
+                    <span>Esegui ora</span>
+                  </button>
+                </div>
+
+                {canPickDirectFile && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-white/80 px-3 py-2">
+                    <div className="text-[11px] text-stone-700 flex items-center gap-1.5 min-w-0">
+                      <FileCheck2 className="h-3.5 w-3.5 text-purple-700 shrink-0" />
+                      <span className="truncate">
+                        {linkedFileName
+                          ? `File collegato: ${linkedFileName}`
+                          : 'Collega file fisso da sovrascrivere'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleLinkLocalAutoFile}
+                        className="min-h-[30px] rounded-lg border border-purple-300 bg-purple-50 px-2.5 py-1 text-[11px] font-semibold text-purple-900 hover:bg-purple-100"
+                      >
+                        {linkedFileName ? 'Cambia' : 'Collega file'}
+                      </button>
+                      {linkedFileName && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await clearLinkedAutoBackupFile();
+                            setLinkedFileName(null);
+                          }}
+                          className="min-h-[30px] rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-600 hover:bg-stone-100"
+                        >
+                          Scollega
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* iOS Autonomous Nightly File Replacement via Comandi Rapidi */}
+                <div className="rounded-xl border border-purple-200 bg-white p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-stone-900">
+                      Automazione autonoma iPhone (Comandi Rapidi)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleCopyAutoBackupUrl}
+                      className="min-h-[30px] inline-flex items-center gap-1 rounded-lg bg-purple-700 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-purple-800 shrink-0"
+                    >
+                      {autoUrlCopied ? (
+                        <Check className="h-3 w-3" aria-hidden="true" />
+                      ) : (
+                        <Copy className="h-3 w-3" aria-hidden="true" />
+                      )}
+                      <span>{autoUrlCopied ? 'Copiato!' : 'Copia URL'}</span>
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    readOnly
+                    value={autoBackupUrl}
+                    onClick={(e) => e.currentTarget.select()}
+                    aria-label="URL automatico per Comandi Rapidi iPhone"
+                    className="w-full min-h-[34px] rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 font-mono text-base sm:text-[11px] text-stone-700"
+                  />
+                  <ol className="list-decimal pl-4 space-y-1 text-[11px] text-stone-600 leading-snug">
+                    <li>
+                      Su iPhone apri <strong>Comandi Rapidi → Automazione → + → Ora del giorno</strong>{' '}
+                      (es. <strong>{String(settings.autoNightlyBackupHour).padStart(2, '0')}:00</strong>,
+                      ogni giorno, <em>Esegui subito</em>).
+                    </li>
+                    <li>
+                      Aggiungi l’azione <strong>Ottieni contenuto di URL</strong> e incolla l’URL qui sopra.
+                    </li>
+                    <li>
+                      Aggiungi <strong>Salva file</strong> in una cartella di <strong>File / iCloud</strong>{' '}
+                      con percorso <span className="font-mono">{AUTO_BACKUP_FILENAME}</span> e attiva{' '}
+                      <strong>Sovrascrivi se esiste</strong>: ogni notte aggiornerà lo stesso file anche ad app chiusa.
+                    </li>
+                  </ol>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       ),

@@ -503,10 +503,48 @@ function daySeedFromISODate(isoDate: string): number {
   return Math.abs(Math.floor(Date.UTC(y, m - 1, d) / 86400000));
 }
 
+const LAUNCH_QUOTE_STORAGE_KEY = 'miciomiao_quote_launch_counter_v1';
+
 export function getCompanionQuoteForDate(isoDate: string, extraOffset = 0): DailyCompanionQuote {
   const len = DAILY_COMPANION_QUOTES.length;
-  // Use a coprime stride (+11) on manual cycling so successive clicks vary authors, categories, and cats
-  const step = extraOffset === 0 ? 0 : extraOffset * 11;
-  const idx = (daySeedFromISODate(isoDate) + step % len + len) % len;
+  // Use a coprime stride (+11, gcd(11, 60) = 1) so every launch and manual click varies quote, category, and cat
+  const step = extraOffset * 11;
+  const idx = (daySeedFromISODate(isoDate) + ((step % len) + len)) % len;
   return DAILY_COMPANION_QUOTES[idx];
+}
+
+export function getInitialLaunchQuoteOffset(isoDate: string): number {
+  const len = DAILY_COMPANION_QUOTES.length;
+  try {
+    const raw = localStorage.getItem(LAUNCH_QUOTE_STORAGE_KEY);
+    let nextOffset = 0;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { date?: string; offset?: number };
+      if (typeof parsed.offset === 'number' && Number.isFinite(parsed.offset)) {
+        nextOffset = ((parsed.offset + 1) % len + len) % len;
+      }
+    } else {
+      nextOffset = Math.floor(Math.random() * len);
+    }
+    localStorage.setItem(
+      LAUNCH_QUOTE_STORAGE_KEY,
+      JSON.stringify({ date: isoDate, offset: nextOffset })
+    );
+    return nextOffset;
+  } catch {
+    return Math.floor(Math.random() * len);
+  }
+}
+
+export function saveManualQuoteOffset(isoDate: string, offset: number): void {
+  const len = DAILY_COMPANION_QUOTES.length;
+  try {
+    const normalized = ((offset % len) + len) % len;
+    localStorage.setItem(
+      LAUNCH_QUOTE_STORAGE_KEY,
+      JSON.stringify({ date: isoDate, offset: normalized })
+    );
+  } catch {
+    // ignore storage errors
+  }
 }

@@ -645,7 +645,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                         resetDragState();
                       }}
                       onDragEnd={resetDragState}
-                      className={`flex items-center gap-1.5 rounded-lg border px-1.5 py-[3px] min-h-[26px] transition-all ${
+                      className={`flex items-center gap-1.5 rounded-lg border px-2 py-[6px] min-h-[34px] transition-all ${
                         isMergeTarget
                           ? 'border-[#0B5B53] bg-[#C4EFE6] ring-2 ring-[#0E8A7E]'
                           : 'border-[#9BDCD1]/90 bg-gradient-to-b from-[#F7FEFC] to-[#E9FAF6]/90 hover:border-[#0E8A7E]/80'
@@ -658,12 +658,17 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                         onPointerDown={(e) => {
                           if (e.pointerType === 'mouse') return;
                           e.stopPropagation();
+                          try {
+                            e.currentTarget.setPointerCapture(e.pointerId);
+                          } catch {
+                            // ignore
+                          }
                           pointerDragRef.current = { id: item.id, active: true };
                           setDraggedTodoId(item.id);
                         }}
-                        className="touch-none h-5 w-4 flex items-center justify-center rounded cursor-grab active:cursor-grabbing shrink-0 text-[#3D8B83] hover:text-[#083B37]"
+                        className="touch-none h-6 w-4.5 flex items-center justify-center rounded cursor-grab active:cursor-grabbing shrink-0 text-[#3D8B83] hover:text-[#083B37]"
                       >
-                        <GripVertical className="h-3 w-3" aria-hidden="true" />
+                        <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
 
                       {/* Ultra-compact Done Toggle */}
@@ -680,13 +685,13 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                         className="h-5 w-5 flex items-center justify-center rounded shrink-0 text-[#0F766E]"
                       >
                         {item.done ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+                          <CheckCircle2 className="h-4 w-4 text-[#0F766E]" aria-hidden="true" />
                         ) : (
-                          <Circle className="h-3.5 w-3.5 text-[#68B9AD]" aria-hidden="true" />
+                          <Circle className="h-4 w-4 text-[#68B9AD]" aria-hidden="true" />
                         )}
                       </button>
 
-                      {/* Clickable Ultra-Slim Note Text + Companion Cat Emoticon */}
+                      {/* Clickable Note Text + Companion Cat Emoticon */}
                       <button
                         type="button"
                         onClick={() => setSelectedTodoId(item.id)}
@@ -697,7 +702,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           text={item.text}
                           blockHint={blockKey}
                           variant="fullFace"
-                          sizeClass="h-[19px] w-[19px]"
+                          sizeClass="h-[22px] w-[22px]"
                         />
                         <span
                           className={`text-xs font-medium text-[#072C29] leading-[1.2] break-words ${
