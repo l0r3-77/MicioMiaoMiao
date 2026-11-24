@@ -1,0 +1,6 @@
+{
+  "name": "AgendaVoce",
+  "description": "App per iOS per registrare note vocali giornaliere, trascriverle e riassumerle in punti organizzati in un'agenda giornaliera, settimanale e mensile.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
