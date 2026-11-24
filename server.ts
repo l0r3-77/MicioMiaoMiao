@@ -14,181 +14,40 @@ const QUOTA_STATE_FILES = [
   path.join(QUOTA_CACHE_DIR, 'agendavoce-quota-state.json'),
   '/tmp/agendavoce-quota-state.json',
 ];
-const WIDGET_STORE_FILES = [
-  path.join(QUOTA_CACHE_DIR, 'agendavoce-widgets.json'),
-  '/tmp/agendavoce-widgets.json',
-];
-const BACKUP_STORE_FILES = [
-  path.join(QUOTA_CACHE_DIR, 'miciomiao-backups.json'),
-  '/tmp/miciomiao-backups.json',
-];
 const DEFAULT_FREE_TIER_LIMIT = 20;
 
 const CAT_EMOTICON_IDS = [
   'cat_note',
-  'cat_happy',
-  'cat_lol',
-  'cat_love',
-  'cat_kiss',
-  'cat_wink',
-  'cat_cool',
-  'cat_star',
-  'cat_party',
-  'cat_think',
-  'cat_wow',
-  'cat_sad',
-  'cat_angry',
-  'cat_sleep',
-  'cat_sick',
-  'cat_hug',
-  'cat_idea',
-  'cat_fire',
+  'cat_fuel',
+  'cat_barber',
+  'cat_car',
+  'cat_shower',
+  'cat_clean',
+  'cat_home',
   'cat_bills',
+  'cat_pet',
+  'cat_health',
   'cat_shop',
   'cat_food',
   'cat_coffee',
   'cat_call',
   'cat_work',
   'cat_book',
-  'cat_fun',
+  'cat_sport',
+  'cat_music',
   'cat_movie',
   'cat_game',
-  'cat_sport',
-  'cat_shower',
-  'cat_clean',
-  'cat_health',
-  'cat_car',
-  'cat_home',
   'cat_gift',
   'cat_sun',
+  'cat_baby',
+  'cat_idea',
+  'cat_fire',
+  'cat_sleep',
+  'cat_think',
+  'cat_sad',
+  'cat_love',
+  'cat_happy',
 ];
-
-interface StoredWidgetTodo {
-  id: string;
-  block: 'poi' | 'svaghi' | 'bollette' | 'poi_poi';
-  text: string;
-  emoji?: string;
-  catId?: string;
-  done: boolean;
-  order: number;
-}
-
-interface StoredWidgetOrganize {
-  id: string;
-  date: string;
-  phase: 'mattina' | 'dopopranzo' | 'pomeriggio' | 'dopocena';
-  text: string;
-  emoji?: string;
-  catId?: string;
-  done: boolean;
-  order: number;
-}
-
-interface StoredWidgetSnapshot {
-  updatedAt: string;
-  todayDate: string;
-  todoItems: StoredWidgetTodo[];
-  organizeItems: StoredWidgetOrganize[];
-}
-
-const widgetStore = new Map<string, StoredWidgetSnapshot>();
-const autoBackupStore = new Map<string, string>();
-
-function loadWidgetStoreFromDisk() {
-  for (const filePath of WIDGET_STORE_FILES) {
-    try {
-      if (!fs.existsSync(filePath)) continue;
-      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<
-        string,
-        StoredWidgetSnapshot
-      >;
-      if (parsed && typeof parsed === 'object') {
-        for (const [token, snap] of Object.entries(parsed)) {
-          if (/^[a-zA-Z0-9_-]{12,64}$/.test(token) && snap && typeof snap === 'object') {
-            widgetStore.set(token, snap);
-          }
-        }
-        break;
-      }
-    } catch {
-      // ignore corrupt widget cache
-    }
-  }
-}
-
-function persistWidgetStoreToDisk() {
-  const entries = Array.from(widgetStore.entries()).slice(-100);
-  const serialized = JSON.stringify(Object.fromEntries(entries));
-  try {
-    if (!fs.existsSync(QUOTA_CACHE_DIR)) {
-      fs.mkdirSync(QUOTA_CACHE_DIR, { recursive: true });
-    }
-  } catch {
-    // ignore mkdir errors
-  }
-  for (const filePath of WIDGET_STORE_FILES) {
-    try {
-      fs.writeFileSync(filePath, serialized);
-    } catch {
-      // ignore disk errors
-    }
-  }
-}
-
-function loadAutoBackupStoreFromDisk() {
-  for (const filePath of BACKUP_STORE_FILES) {
-    try {
-      if (!fs.existsSync(filePath)) continue;
-      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, string>;
-      if (parsed && typeof parsed === 'object') {
-        for (const [token, rawJson] of Object.entries(parsed)) {
-          if (/^[a-zA-Z0-9_-]{24,64}$/.test(token) && typeof rawJson === 'string') {
-            autoBackupStore.set(token, rawJson);
-          }
-        }
-        break;
-      }
-    } catch {
-      // ignore corrupt backup cache
-    }
-  }
-}
-
-function persistAutoBackupStoreToDisk() {
-  const entries = Array.from(autoBackupStore.entries()).slice(-20);
-  const serialized = JSON.stringify(Object.fromEntries(entries));
-  try {
-    if (!fs.existsSync(QUOTA_CACHE_DIR)) {
-      fs.mkdirSync(QUOTA_CACHE_DIR, { recursive: true });
-    }
-  } catch {
-    // ignore mkdir errors
-  }
-  for (const filePath of BACKUP_STORE_FILES) {
-    try {
-      fs.writeFileSync(filePath, serialized);
-    } catch {
-      // ignore disk errors
-    }
-  }
-}
-
-loadWidgetStoreFromDisk();
-loadAutoBackupStoreFromDisk();
-
-const PHASE_TITLES: Record<StoredWidgetOrganize['phase'], string> = {
-  mattina: 'Mattina',
-  dopopranzo: 'Dopopranzo',
-  pomeriggio: 'Pomeriggio',
-  dopocena: 'Dopocena',
-};
-
-const BLOCK_TITLES: Record<StoredWidgetTodo['block'], string> = {
-  poi: 'Poi',
-  svaghi: 'Svaghi',
-  bollette: 'Bollette e pagamenti',
-  poi_poi: 'Poi poi',
-};
 
 interface ServerQuotaState {
   dayKey: string;
@@ -1099,205 +958,7 @@ async function startServer() {
     res.json({ quota: syncClientQuotaState(body.quota) });
   });
 
-  app.put('/api/widget/:token', (req, res) => {
-    const token = String(req.params.token || '');
-    if (!/^[a-zA-Z0-9_-]{12,64}$/.test(token)) {
-      return res.status(400).json({ error: 'Token widget non valido.' });
-    }
-    const body = (req.body || {}) as Partial<StoredWidgetSnapshot>;
-    const validBlocks = new Set(['poi', 'svaghi', 'bollette', 'poi_poi']);
-    const validPhases = new Set(['mattina', 'dopopranzo', 'pomeriggio', 'dopocena']);
 
-    const todoItems: StoredWidgetTodo[] = Array.isArray(body.todoItems)
-      ? body.todoItems
-          .filter((x): x is StoredWidgetTodo => Boolean(x && typeof x === 'object'))
-          .slice(0, 300)
-          .map((x, idx) => ({
-            id: typeof x.id === 'string' ? x.id.slice(0, 80) : `t-${idx}`,
-            block: validBlocks.has(x.block) ? x.block : 'poi',
-            text: typeof x.text === 'string' ? x.text.slice(0, 500) : '',
-            emoji: typeof x.emoji === 'string' ? x.emoji.slice(0, 12) : '',
-            catId: typeof x.catId === 'string' ? x.catId.slice(0, 32) : '',
-            done: Boolean(x.done),
-            order: typeof x.order === 'number' ? x.order : idx,
-          }))
-      : [];
-
-    const organizeItems: StoredWidgetOrganize[] = Array.isArray(body.organizeItems)
-      ? body.organizeItems
-          .filter((x): x is StoredWidgetOrganize => Boolean(x && typeof x === 'object'))
-          .slice(0, 500)
-          .map((x, idx) => ({
-            id: typeof x.id === 'string' ? x.id.slice(0, 80) : `o-${idx}`,
-            date:
-              typeof x.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x.date)
-                ? x.date
-                : new Date().toISOString().slice(0, 10),
-            phase: validPhases.has(x.phase) ? x.phase : 'mattina',
-            text: typeof x.text === 'string' ? x.text.slice(0, 500) : '',
-            emoji: typeof x.emoji === 'string' ? x.emoji.slice(0, 12) : '',
-            catId: typeof x.catId === 'string' ? x.catId.slice(0, 32) : '',
-            done: Boolean(x.done),
-            order: typeof x.order === 'number' ? x.order : idx,
-          }))
-      : [];
-
-    const snapshot: StoredWidgetSnapshot = {
-      updatedAt:
-        typeof body.updatedAt === 'string' ? body.updatedAt : new Date().toISOString(),
-      todayDate:
-        typeof body.todayDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.todayDate)
-          ? body.todayDate
-          : new Date().toISOString().slice(0, 10),
-      todoItems,
-      organizeItems,
-    };
-
-    widgetStore.set(token, snapshot);
-    persistWidgetStoreToDisk();
-    return res.json({ ok: true, updatedAt: snapshot.updatedAt });
-  });
-
-  app.get('/api/widget/:token/state', (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    const token = String(req.params.token || '');
-    if (!/^[a-zA-Z0-9_-]{12,64}$/.test(token)) {
-      return res.status(400).json({ error: 'Token widget non valido.' });
-    }
-    const snapshot = widgetStore.get(token);
-    if (!snapshot) {
-      return res.json({
-        exists: false,
-        updatedAt: '',
-        todayDate: new Date().toISOString().slice(0, 10),
-        todoItems: [],
-        organizeItems: [],
-      });
-    }
-    return res.json({
-      exists: true,
-      updatedAt: snapshot.updatedAt,
-      todayDate: snapshot.todayDate,
-      todoItems: snapshot.todoItems,
-      organizeItems: snapshot.organizeItems,
-    });
-  });
-
-  app.put('/api/backup/:token', (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    const token = String(req.params.token || '');
-    if (!/^[a-zA-Z0-9_-]{24,64}$/.test(token)) {
-      return res.status(400).json({ error: 'Token backup non valido.' });
-    }
-    const body = req.body as Record<string, unknown> | undefined;
-    if (!body || typeof body !== 'object' || !Array.isArray(body.dailyNotes)) {
-      return res.status(400).json({ error: 'Payload backup non valido.' });
-    }
-    const serialized = JSON.stringify(body, null, 2);
-    if (serialized.length > 25 * 1024 * 1024) {
-      return res.status(413).json({ error: 'Backup troppo grande per la sincronizzazione automatica.' });
-    }
-    autoBackupStore.set(token, serialized);
-    persistAutoBackupStoreToDisk();
-    return res.json({ ok: true, updatedAt: new Date().toISOString() });
-  });
-
-  app.get('/api/backup/:token', (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    const token = String(req.params.token || '');
-    if (!/^[a-zA-Z0-9_-]{24,64}$/.test(token)) {
-      return res.status(400).json({ error: 'Token backup non valido.' });
-    }
-    const stored = autoBackupStore.get(token);
-    if (!stored) {
-      return res.status(404).json({
-        error: 'Nessun backup sincronizzato trovato per questo token. Apri MicioMiao almeno una volta dopo aver attivato il backup notturno.',
-      });
-    }
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="miciomiao-backup-automatico.json"');
-    return res.send(stored);
-  });
-
-  app.get('/api/widget/:token', (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'no-store');
-    const token = String(req.params.token || '');
-    if (!/^[a-zA-Z0-9_-]{12,64}$/.test(token)) {
-      return res.status(400).json({ error: 'Token widget non valido.' });
-    }
-    const source = String(req.query.source || 'today');
-    const snapshot = widgetStore.get(token);
-    const todayDate = snapshot?.todayDate || new Date().toISOString().slice(0, 10);
-
-    if (!snapshot) {
-      return res.json({
-        title:
-          source in BLOCK_TITLES
-            ? `Da Fare · ${BLOCK_TITLES[source as StoredWidgetTodo['block']]}`
-            : 'Organizza · Oggi',
-        source,
-        todayDate,
-        updatedAt: new Date().toISOString(),
-        items: [],
-      });
-    }
-
-    if (source in BLOCK_TITLES) {
-      const blockKey = source as StoredWidgetTodo['block'];
-      const items = snapshot.todoItems
-        .filter((item) => item.block === blockKey)
-        .sort((a, b) => a.order - b.order)
-        .map((item) => ({
-          id: item.id,
-          text: item.text || 'Nota',
-          emoji: item.emoji || '',
-          done: item.done,
-          phaseLabel: null,
-        }));
-      return res.json({
-        title: `Da Fare · ${BLOCK_TITLES[blockKey]}`,
-        source,
-        todayDate,
-        updatedAt: snapshot.updatedAt,
-        items,
-      });
-    }
-
-    const phaseOrder: Record<StoredWidgetOrganize['phase'], number> = {
-      mattina: 0,
-      dopopranzo: 1,
-      pomeriggio: 2,
-      dopocena: 3,
-    };
-    const sortedOrg = snapshot.organizeItems
-      .filter((item) => item.date === todayDate)
-      .sort((a, b) => {
-        const pd = phaseOrder[a.phase] - phaseOrder[b.phase];
-        return pd !== 0 ? pd : a.order - b.order;
-      });
-    let lastPhase: StoredWidgetOrganize['phase'] | null = null;
-    const items = sortedOrg.map((item) => {
-      const isFirstInPhase = item.phase !== lastPhase;
-      lastPhase = item.phase;
-      return {
-        id: item.id,
-        text: item.text || 'Nota',
-        emoji: item.emoji || '',
-        done: item.done,
-        phase: item.phase,
-        phaseLabel: isFirstInPhase ? PHASE_TITLES[item.phase] : null,
-      };
-    });
-
-    return res.json({
-      title: `Oggi · ${todayDate.split('-').reverse().join('/')}`,
-      source: 'today',
-      todayDate,
-      updatedAt: snapshot.updatedAt,
-      items,
-    });
-  });
 
   app.post('/api/notes/transcribe', async (req, res) => {
     try {
@@ -1419,7 +1080,7 @@ async function startServer() {
                     parts: [
                       { inlineData: { mimeType: cleanMime, data: audioBase64 } },
                       {
-                        text: `Trascrivi fedelmente questa breve nota vocale da fare in italiano e scegli l'ID emoticon del gatto companion più adatto tra quelli consentiti. Restituisci SOLO JSON con "text" e "emoji". Se non c'è parlato metti text="[SILENZIO]".`,
+                        text: `Trascrivi fedelmente questa breve nota vocale da fare in italiano e scegli l'ID icona del gatto MicioMiao più inerente al significato del testo tra quelli consentiti (es. benzina/gpl/diesel/rifornimento -> "cat_fuel", barbiere/barber/capelli/barba -> "cat_barber", auto/gomme/meccanico -> "cat_car", doccia/bagno/lavarsi -> "cat_shower", pulizie/bucato/spazzare -> "cat_clean", bollette/pagamenti/banca -> "cat_bills", cane/gatto/veterinario -> "cat_pet", spesa/supermercato/comprare -> "cat_shop", dottore/farmacia/visita -> "cat_health", caffè/colazione -> "cat_coffee", pranzo/cena/cucinare -> "cat_food", chiamata/messaggio -> "cat_call", lavoro/ufficio/email -> "cat_work", sport/palestra -> "cat_sport", urgente -> "cat_fire"). Restituisci SOLO JSON con "text" e "emoji". Se non c'è parlato metti text="[SILENZIO]".`,
                       },
                     ],
                   },
@@ -1513,7 +1174,7 @@ async function startServer() {
         () =>
           ai.models.generateContent({
             model: models[0],
-            contents: `Associa a ciascuna delle ${fallbackLines.length} righe numerate l'ID emoticon del gatto companion più adatto.
+            contents: `Associa a ciascuna delle ${fallbackLines.length} righe numerate l'ID icona del gatto MicioMiao più inerente al testo (es. benzina/gpl/rifornimento -> "cat_fuel", barber/barbiere/capelli -> "cat_barber", auto/revisione -> "cat_car", doccia -> "cat_shower", pulizie/bucato -> "cat_clean", bollette/pagamenti -> "cat_bills", cane/gatto -> "cat_pet", spesa/acquisti -> "cat_shop", dottore/salute -> "cat_health", caffè -> "cat_coffee", cibo/cena -> "cat_food", chiamare -> "cat_call", lavoro -> "cat_work", sport -> "cat_sport").
 REGOLA ASSOLUTA: ogni riga numerata DEVE restare UNA SOLA nota. Anche se su una stessa riga ci sono più attività (separate da virgole, "e", ";", "/" o trattini), NON dividerle MAI su più note: mantieni tutte le attività di quella riga in una riga sola. Restituisci esattamente un elemento per ogni indice da 0 a ${fallbackLines.length - 1}.
 
 Righe:

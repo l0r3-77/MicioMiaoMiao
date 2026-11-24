@@ -5,7 +5,6 @@ import type {
   OrganizeNoteItem,
   TodoBlockKey,
   TodoNoteItem,
-  WidgetConfig,
 } from '../types/dailyTodo';
 import type { DailyNote } from '../types/note';
 import { DAY_PHASE_MAP } from '../utils/dailyTodoStorage';
@@ -24,16 +23,10 @@ interface DailyTodoSectionProps {
   organizeItems: OrganizeNoteItem[];
   todoLayout: SectionLayoutState;
   organizeLayout: SectionLayoutState;
-  widgetConfig: WidgetConfig;
-  widgetSyncStatus: 'idle' | 'syncing' | 'synced' | 'error';
-  widgetLastSyncedAt: string | null;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onSetTodoItems: React.Dispatch<React.SetStateAction<TodoNoteItem[]>>;
   onSetOrganizeItems: React.Dispatch<React.SetStateAction<OrganizeNoteItem[]>>;
-  onChangeWidgetConfig: (patch: Partial<WidgetConfig>) => void;
-  onForceSyncWidget: () => void;
-  onActivateDirectWidgetMode?: () => void;
   onNotify: (msg: string) => void;
 }
 
@@ -44,16 +37,10 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
   organizeItems,
   todoLayout,
   organizeLayout,
-  widgetConfig,
-  widgetSyncStatus,
-  widgetLastSyncedAt,
   onChangeLayout,
   onResetLayout,
   onSetTodoItems,
   onSetOrganizeItems,
-  onChangeWidgetConfig,
-  onForceSyncWidget,
-  onActivateDirectWidgetMode,
   onNotify,
 }) => {
   const handleAddTodo = (item: TodoNoteItem) => {
@@ -383,11 +370,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
       {subTab === 'da_fare' ? (
         <DaFareSubsection
           todoItems={todoItems}
-          organizeItems={organizeItems}
           sectionLayout={todoLayout}
-          widgetConfig={widgetConfig}
-          widgetSyncStatus={widgetSyncStatus}
-          widgetLastSyncedAt={widgetLastSyncedAt}
           onChangeLayout={onChangeLayout}
           onResetLayout={onResetLayout}
           onAddTodo={handleAddTodo}
@@ -398,18 +381,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           onMergeTodos={handleMergeTodos}
           onMoveTodoStep={handleMoveTodoStep}
           onSendTodoToOrganize={handleSendTodoToOrganize}
-          onChangeWidgetConfig={onChangeWidgetConfig}
-          onForceSyncWidget={onForceSyncWidget}
-          onActivateDirectHomeWidget={onActivateDirectWidgetMode}
-          onToggleOrganizeDone={(id) =>
-            onSetOrganizeItems((prev) =>
-              prev.map((item) =>
-                item.id === id
-                  ? { ...item, done: !item.done, updatedAt: new Date().toISOString() }
-                  : item
-              )
-            )
-          }
           onNotify={onNotify}
         />
       ) : (
@@ -418,9 +389,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           todoItems={todoItems}
           organizeItems={organizeItems}
           sectionLayout={organizeLayout}
-          widgetConfig={widgetConfig}
-          widgetSyncStatus={widgetSyncStatus}
-          widgetLastSyncedAt={widgetLastSyncedAt}
           onChangeLayout={onChangeLayout}
           onResetLayout={onResetLayout}
           onAddOrganizeItem={handleAddOrganizeItem}
@@ -431,18 +399,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           onMergeOrganizeItems={handleMergeOrganizeItems}
           onMoveOrganizeStep={handleMoveOrganizeStep}
           onPickTodoForOrganize={handleSendTodoToOrganize}
-          onChangeWidgetConfig={onChangeWidgetConfig}
-          onForceSyncWidget={onForceSyncWidget}
-          onActivateDirectHomeWidget={onActivateDirectWidgetMode}
-          onToggleTodoDone={(id) =>
-            onSetTodoItems((prev) =>
-              prev.map((item) =>
-                item.id === id
-                  ? { ...item, done: !item.done, updatedAt: new Date().toISOString() }
-                  : item
-              )
-            )
-          }
           onNotify={onNotify}
         />
       )}

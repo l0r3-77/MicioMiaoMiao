@@ -35,13 +35,3 @@ export interface OrganizeNoteItem {
   updatedAt: string;
 }
 
-export type WidgetSourceKey = 'today' | TodoBlockKey;
-export type WidgetSizePreset = 'small' | 'medium' | 'large';
-
-export interface WidgetConfig {
-  token: string;
-  source: WidgetSourceKey;
-  size: WidgetSizePreset;
-  customHeightPx: number;
-  customWidthPct: number;
-}

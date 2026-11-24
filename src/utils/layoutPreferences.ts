@@ -64,13 +64,11 @@ export const SECTION_BLOCKS: Record<LayoutSectionKey, SectionBlockDefinition[]> 
     { id: 'todo_svaghi', label: 'Blocco: Svaghi' },
     { id: 'todo_bollette', label: 'Blocco: Bollette e pagamenti' },
     { id: 'todo_poi_poi', label: 'Blocco: Poi poi' },
-    { id: 'todo_widget', label: 'Widget iPhone Home' },
   ],
   organize: [
     { id: 'org_controls', label: 'Barra Azioni & Nuova nota' },
     { id: 'org_calendar', label: 'Calendario verticale (Fasi & Zoom)' },
     { id: 'org_export', label: 'Esporta & Stampa Giornata / Settimana' },
-    { id: 'org_widget', label: 'Widget iPhone Home' },
   ],
   settings: [
     { id: 'settings_local_backup', label: 'Download, iCloud / File & Upload JSON' },

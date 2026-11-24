@@ -3,11 +3,13 @@ import {
   ArrowDown,
   ArrowUp,
   Calendar,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Circle,
   ClipboardPaste,
+  Copy,
   GripVertical,
   ListTodo,
   Loader2,
@@ -25,7 +27,6 @@ import type {
   DayPhaseKey,
   OrganizeNoteItem,
   TodoNoteItem,
-  WidgetConfig,
 } from '../types/dailyTodo';
 import type { DailyNote } from '../types/note';
 import {
@@ -34,6 +35,7 @@ import {
   TODO_BLOCKS,
 } from '../utils/dailyTodoStorage';
 import {
+  copyTextToClipboard,
   parsePastedLinesSingleRow,
   readClipboardTextDirect,
 } from '../utils/clipboardHelper';
@@ -57,7 +59,6 @@ import {
   CustomizableSectionStack,
   type CustomizableBlockItem,
 } from './CustomizableSectionStack';
-import { IPhoneWidgetStudio } from './IPhoneWidgetStudio';
 import {
   OrganizeExportCardBlock,
   OrganizeExportModal,
@@ -68,9 +69,6 @@ interface OrganizzaSubsectionProps {
   todoItems: TodoNoteItem[];
   organizeItems: OrganizeNoteItem[];
   sectionLayout: SectionLayoutState;
-  widgetConfig: WidgetConfig;
-  widgetSyncStatus: 'idle' | 'syncing' | 'synced' | 'error';
-  widgetLastSyncedAt: string | null;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddOrganizeItem: (item: OrganizeNoteItem) => void;
@@ -91,11 +89,6 @@ interface OrganizzaSubsectionProps {
     phase: DayPhaseKey,
     removeFromTodo: boolean
   ) => void;
-  onChangeWidgetConfig: (patch: Partial<WidgetConfig>) => void;
-  onForceSyncWidget: () => void;
-  openWidgetHomeTrigger?: number;
-  onActivateDirectHomeWidget?: () => void;
-  onToggleTodoDone: (id: string) => void;
   onNotify: (msg: string) => void;
 }
 
@@ -104,9 +97,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   todoItems,
   organizeItems,
   sectionLayout,
-  widgetConfig,
-  widgetSyncStatus,
-  widgetLastSyncedAt,
   onChangeLayout,
   onResetLayout,
   onAddOrganizeItem,
@@ -117,11 +107,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   onMergeOrganizeItems,
   onMoveOrganizeStep,
   onPickTodoForOrganize,
-  onChangeWidgetConfig,
-  onForceSyncWidget,
-  openWidgetHomeTrigger = 0,
-  onActivateDirectHomeWidget,
-  onToggleTodoDone,
   onNotify,
 }) => {
   const todayIso = toISODate(new Date());
@@ -129,6 +114,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   const [totalDaysCount, setTotalDaysCount] = useState<number>(14);
   // Horizontal zoom slider: 1 to 4 visible days on screen (default 4)
   const [visibleDaysZoom, setVisibleDaysZoom] = useState<number>(4);
+  const [copiedDayIso, setCopiedDayIso] = useState<string | null>(null);
 
   // Compact New Note Modal (triggered by tapping a day phase or "+ Nuova nota")
   const [newModalOpen, setNewModalOpen] = useState(false);
@@ -623,6 +609,33 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     }
   };
 
+  const handleCopyDayNotes = async (isoDate: string) => {
+    const sections: string[] = [];
+    for (const phase of DAY_PHASES) {
+      const slotItems = (itemsBySlot.get(`${isoDate}|${phase.key}`) || [])
+        .map((it) => it.text.trim())
+        .filter(Boolean);
+      if (slotItems.length > 0) {
+        sections.push([phase.title, ...slotItems].join('\n'));
+      }
+    }
+    if (sections.length === 0) {
+      onNotify(`Nessuna nota da copiare per ${formatItalianDateShort(isoDate)}`);
+      return;
+    }
+    const ok = await copyTextToClipboard(sections.join('\n\n'));
+    if (ok) {
+      setCopiedDayIso(isoDate);
+      window.setTimeout(
+        () => setCopiedDayIso((prev) => (prev === isoDate ? null : prev)),
+        1800
+      );
+      onNotify(`Note del ${formatItalianDateShort(isoDate)} copiate negli appunti`);
+    } else {
+      onNotify('Copia non consentita dal browser');
+    }
+  };
+
   // Zoom calibration (1 to 4 days visible in scroll viewport)
   const isDense4 = visibleDaysZoom >= 4;
   const isDense3 = visibleDaysZoom === 3;
@@ -815,13 +828,25 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
+                        onClick={() => handleCopyDayNotes(isoDate)}
+                        aria-label={`Copia note di ${dateShort}`}
+                        title="Copia tutte le note del giorno con le fasi"
+                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[#7ECBBF] bg-[#E5F9F4] text-[#0F766E] hover:bg-[#C7EFE6] transition-colors"
+                      >
+                        {copiedDayIso === isoDate ? (
+                          <Check className="h-2.5 w-2.5" aria-hidden="true" />
+                        ) : (
+                          <Copy className="h-2.5 w-2.5" aria-hidden="true" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleOpenPasteModalForDay(isoDate)}
                         aria-label={`Incolla note in ${dateShort}`}
                         title="Incolla da appunti (1 riga = 1 nota)"
-                        className="h-5 inline-flex items-center gap-0.5 rounded border border-[#7ECBBF] bg-[#E5F9F4] px-1 text-[9.5px] font-semibold text-[#083B37] hover:bg-[#C7EFE6] transition-colors whitespace-nowrap"
+                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[#7ECBBF] bg-[#E5F9F4] text-[#0F766E] hover:bg-[#C7EFE6] transition-colors"
                       >
-                        <ClipboardPaste className="h-2.5 w-2.5 text-[#0F766E]" aria-hidden="true" />
-                        <span>Incolla</span>
+                        <ClipboardPaste className="h-2.5 w-2.5" aria-hidden="true" />
                       </button>
                       <button
                         type="button"
@@ -1165,33 +1190,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         <OrganizeExportCardBlock
           organizeItems={organizeItems}
           dailyNotes={dailyNotes}
-          onNotify={onNotify}
-        />
-      ),
-    },
-    {
-      id: 'org_widget',
-      render: () => (
-        <IPhoneWidgetStudio
-          config={widgetConfig}
-          todoItems={todoItems}
-          organizeItems={organizeItems}
-          syncStatus={widgetSyncStatus}
-          lastSyncedAt={widgetLastSyncedAt}
-          openHomeTrigger={openWidgetHomeTrigger}
-          onChangeConfig={onChangeWidgetConfig}
-          onForceSync={onForceSyncWidget}
-          onActivateDirectHomeWidget={onActivateDirectHomeWidget}
-          onToggleTodoDone={onToggleTodoDone}
-          onToggleOrganizeDone={(id) => {
-            const target = organizeItems.find((o) => o.id === id);
-            if (target) {
-              onUpdateOrganizeItem(id, {
-                done: !target.done,
-                updatedAt: new Date().toISOString(),
-              });
-            }
-          }}
           onNotify={onNotify}
         />
       ),

@@ -1,13 +1,10 @@
-import type { OrganizeNoteItem, TodoNoteItem, WidgetConfig } from '../types/dailyTodo';
+import type { OrganizeNoteItem, TodoNoteItem } from '../types/dailyTodo';
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
 import type { AppSettings } from './appSettings';
-import {
-  generateAutoBackupToken,
-  isValidAutoBackupToken,
-} from './appSettings';
 import { getAudioClip, saveAudioClip } from './audioStorage';
 import {
-  loadWidgetConfig,
+  DAY_PHASE_MAP,
+  TODO_BLOCK_MAP,
   sanitizeOrganizeItems,
   sanitizeTodoItems,
 } from './dailyTodoStorage';
@@ -15,21 +12,47 @@ import { formatItalianDateShort, toISODate } from './dateUtils';
 import type { AllLayoutPreferences } from './layoutPreferences';
 import { VALID_NOTE_COLORS } from './noteColors';
 
+export const BACKUP_FILENAME = 'dati-miciomiao.json';
+
 export interface SerializedAudioClip {
   mimeType: string;
   base64: string;
 }
 
+export interface UnifiedBackupNoteEntry {
+  sezione: 'Diario' | 'Da Fare' | 'Organizza';
+  date?: string;
+  time?: string;
+  block?: string;
+  phase?: string;
+  done?: boolean;
+  text: string;
+  bullets?: string[];
+  updatedAt: string;
+}
+
+export interface LatestDayBackupSummary {
+  date: string;
+  title: string;
+  pinned: boolean;
+  dailySummaryBullets: string[];
+  entries: NoteEntry[];
+  organizeItems: OrganizeNoteItem[];
+}
+
 export interface AgendaVoceBackupPayload {
   version: 1;
-  app: 'AgendaVoce';
+  app: 'MicioMiao' | 'AgendaVoce';
   exportedAt: string;
+  oggi?: string;
+  ultimogiorno?: LatestDayBackupSummary | null;
+  ultimaNota?: UnifiedBackupNoteEntry | null;
+  note?: UnifiedBackupNoteEntry[];
   dailyNotes: DailyNote[];
   todoItems?: TodoNoteItem[];
   organizeItems?: OrganizeNoteItem[];
   layouts?: AllLayoutPreferences;
   settings?: AppSettings;
-  widgetConfig?: WidgetConfig;
   statsPrefs?: Record<string, unknown>;
   agendaZooms?: Record<string, string>;
   audioClips?: Record<string, SerializedAudioClip>;
@@ -110,8 +133,7 @@ export async function buildBackupPayload(
   includeAudio: boolean,
   todoItems: TodoNoteItem[] = [],
   organizeItems: OrganizeNoteItem[] = [],
-  settings?: AppSettings,
-  widgetConfig?: WidgetConfig
+  settings?: AppSettings
 ): Promise<AgendaVoceBackupPayload> {
   const audioClips: Record<string, SerializedAudioClip> = {};
 
@@ -151,20 +173,114 @@ export async function buildBackupPayload(
     }
   }
 
+  const oggi = toISODate(new Date());
+
+  // Sort dailyNotes newest day first, with entries inside sorted newest first
+  const sortedDailyNotes: DailyNote[] = [...dailyNotes]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map((dn) => ({
+      ...dn,
+      entries: [...dn.entries].sort(
+        (a, b) =>
+          b.time.localeCompare(a.time) ||
+          (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+      ),
+    }));
+
+  const sortedTodoItems = [...todoItems].sort((a, b) =>
+    (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+  );
+  const sortedOrganizeItems = [...organizeItems].sort(
+    (a, b) =>
+      b.date.localeCompare(a.date) ||
+      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+  );
+
+  // Unified chronological list across Diario, Da Fare & Organizza strictly newest -> oldest
+  const unifiedNotes: UnifiedBackupNoteEntry[] = [];
+  for (const dn of sortedDailyNotes) {
+    for (const e of dn.entries) {
+      unifiedNotes.push({
+        sezione: 'Diario',
+        date: dn.date,
+        time: e.time,
+        text: e.transcript,
+        ...(e.bullets.length > 0 ? { bullets: e.bullets } : {}),
+        updatedAt: e.updatedAt || e.createdAt || `${dn.date}T${e.time}:00`,
+      });
+    }
+  }
+  for (const t of sortedTodoItems) {
+    unifiedNotes.push({
+      sezione: 'Da Fare',
+      block: TODO_BLOCK_MAP[t.block]?.title || t.block,
+      done: t.done,
+      text: t.text,
+      updatedAt: t.updatedAt || t.createdAt,
+    });
+  }
+  for (const o of sortedOrganizeItems) {
+    unifiedNotes.push({
+      sezione: 'Organizza',
+      date: o.date,
+      phase: DAY_PHASE_MAP[o.phase]?.title || o.phase,
+      done: o.done,
+      text: o.text,
+      updatedAt: o.updatedAt || o.createdAt,
+    });
+  }
+  unifiedNotes.sort((a, b) => {
+    const cmpTs = (b.updatedAt || '').localeCompare(a.updatedAt || '');
+    if (cmpTs !== 0) return cmpTs;
+    const cmpDate = (b.date || '').localeCompare(a.date || '');
+    if (cmpDate !== 0) return cmpDate;
+    return (b.time || '').localeCompare(a.time || '');
+  });
+
+  // Prominent snapshot of the most recent active day (preferring today if populated)
+  const todayHasActivity =
+    sortedDailyNotes.some((dn) => dn.date === oggi) ||
+    sortedOrganizeItems.some((o) => o.date === oggi);
+  const latestDayCandidate = todayHasActivity
+    ? oggi
+    : [sortedDailyNotes[0]?.date, sortedOrganizeItems[0]?.date]
+        .filter((d): d is string => Boolean(d))
+        .sort((a, b) => b.localeCompare(a))[0] || null;
+
+  const latestDayNoteObj = latestDayCandidate
+    ? sortedDailyNotes.find((dn) => dn.date === latestDayCandidate)
+    : undefined;
+  const latestDayOrgItems = latestDayCandidate
+    ? sortedOrganizeItems.filter((o) => o.date === latestDayCandidate)
+    : [];
+
+  const ultimogiorno: LatestDayBackupSummary | null = latestDayCandidate
+    ? {
+        date: latestDayCandidate,
+        title: latestDayNoteObj?.title || `Diario del ${formatItalianDateShort(latestDayCandidate)}`,
+        pinned: latestDayNoteObj?.pinned ?? false,
+        dailySummaryBullets: latestDayNoteObj?.dailySummaryBullets ?? [],
+        entries: latestDayNoteObj?.entries ?? [],
+        organizeItems: latestDayOrgItems,
+      }
+    : null;
+
   const statsPrefs = readLocalJsonRecord('agendavoce_stats_prefs_v1');
   const agendaZooms = readAgendaZooms();
-  const resolvedWidgetConfig = widgetConfig || loadWidgetConfig();
 
   return {
     version: 1,
-    app: 'AgendaVoce',
+    app: 'MicioMiao',
     exportedAt: new Date().toISOString(),
-    dailyNotes,
-    todoItems,
-    organizeItems,
+    oggi,
+    ultimogiorno,
+    ultimaNota: unifiedNotes[0] || null,
+    note: unifiedNotes,
+    dailyNotes: sortedDailyNotes,
+    todoItems: sortedTodoItems,
+    organizeItems: sortedOrganizeItems,
     layouts,
     ...(settings ? { settings } : {}),
-    widgetConfig: resolvedWidgetConfig,
     ...(statsPrefs ? { statsPrefs } : {}),
     ...(agendaZooms ? { agendaZooms } : {}),
     ...(Object.keys(audioClips).length > 0 ? { audioClips } : {}),
@@ -271,7 +387,7 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
 
   const parsedSettings =
     record.settings && typeof record.settings === 'object'
-      ? (record.settings as Partial<AppSettings>)
+      ? (record.settings as Partial<AppSettings> & { autoNightlyBackupEnabled?: boolean })
       : undefined;
   const settings: AppSettings | undefined = parsedSettings
     ? {
@@ -289,70 +405,14 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
           typeof parsedSettings.includeAudioInBackup === 'boolean'
             ? parsedSettings.includeAudioInBackup
             : true,
-        autoNightlyBackupEnabled:
-          typeof parsedSettings.autoNightlyBackupEnabled === 'boolean'
-            ? parsedSettings.autoNightlyBackupEnabled
-            : true,
-        autoNightlyBackupHour:
-          typeof parsedSettings.autoNightlyBackupHour === 'number' &&
-          Number.isInteger(parsedSettings.autoNightlyBackupHour) &&
-          parsedSettings.autoNightlyBackupHour >= 0 &&
-          parsedSettings.autoNightlyBackupHour <= 5
-            ? parsedSettings.autoNightlyBackupHour
-            : 2,
-        autoBackupToken: isValidAutoBackupToken(parsedSettings.autoBackupToken)
-          ? parsedSettings.autoBackupToken
-          : generateAutoBackupToken(),
-        lastAutoBackupDate:
-          typeof parsedSettings.lastAutoBackupDate === 'string' &&
-          /^\d{4}-\d{2}-\d{2}$/.test(parsedSettings.lastAutoBackupDate)
-            ? parsedSettings.lastAutoBackupDate
-            : null,
-        lastAutoBackupAt:
-          typeof parsedSettings.lastAutoBackupAt === 'string'
-            ? parsedSettings.lastAutoBackupAt
-            : null,
+        autoBackupOnOpenClose:
+          typeof parsedSettings.autoBackupOnOpenClose === 'boolean'
+            ? parsedSettings.autoBackupOnOpenClose
+            : typeof parsedSettings.autoNightlyBackupEnabled === 'boolean'
+              ? parsedSettings.autoNightlyBackupEnabled
+              : true,
       }
     : undefined;
-
-  const rawWidget =
-    record.widgetConfig && typeof record.widgetConfig === 'object'
-      ? (record.widgetConfig as Partial<WidgetConfig>)
-      : undefined;
-  const widgetConfig: WidgetConfig | undefined =
-    rawWidget && typeof rawWidget.token === 'string'
-      ? {
-          token: /^[a-zA-Z0-9_-]{12,64}$/.test(rawWidget.token)
-            ? rawWidget.token
-            : loadWidgetConfig().token,
-          source:
-            rawWidget.source === 'today' ||
-            rawWidget.source === 'poi' ||
-            rawWidget.source === 'svaghi' ||
-            rawWidget.source === 'bollette' ||
-            rawWidget.source === 'poi_poi'
-              ? rawWidget.source
-              : 'today',
-          size:
-            rawWidget.size === 'small' ||
-            rawWidget.size === 'medium' ||
-            rawWidget.size === 'large'
-              ? rawWidget.size
-              : 'medium',
-          customHeightPx:
-            typeof rawWidget.customHeightPx === 'number' &&
-            rawWidget.customHeightPx >= 130 &&
-            rawWidget.customHeightPx <= 460
-              ? rawWidget.customHeightPx
-              : 196,
-          customWidthPct:
-            typeof rawWidget.customWidthPct === 'number' &&
-            rawWidget.customWidthPct >= 50 &&
-            rawWidget.customWidthPct <= 100
-              ? rawWidget.customWidthPct
-              : 100,
-        }
-      : undefined;
 
   const statsPrefs =
     record.statsPrefs && typeof record.statsPrefs === 'object'
@@ -370,7 +430,7 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
 
   return {
     version: 1,
-    app: 'AgendaVoce',
+    app: 'MicioMiao',
     exportedAt: typeof record.exportedAt === 'string' ? record.exportedAt : nowIso,
     dailyNotes: sanitizedDays,
     ...(todoItems ? { todoItems } : {}),
@@ -380,7 +440,6 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
         ? (record.layouts as AllLayoutPreferences)
         : undefined,
     ...(settings ? { settings } : {}),
-    ...(widgetConfig ? { widgetConfig } : {}),
     ...(statsPrefs ? { statsPrefs } : {}),
     ...(agendaZooms && Object.keys(agendaZooms).length > 0 ? { agendaZooms } : {}),
     ...(Object.keys(audioClips).length > 0 ? { audioClips } : {}),
@@ -452,7 +511,7 @@ export function mergeDailyNotesFromBackup(
 export function downloadBackupJsonFile(payload: AgendaVoceBackupPayload): string {
   const jsonStr = JSON.stringify(payload, null, 2);
   const blob = new Blob([jsonStr], { type: 'application/json' });
-  const filename = `miciomiao-backup-${toISODate(new Date())}.json`;
+  const filename = BACKUP_FILENAME;
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -470,8 +529,7 @@ export async function shareBackupToICloudOrFiles(
   if (typeof navigator === 'undefined' || typeof navigator.share !== 'function') {
     return false;
   }
-  const filename = `miciomiao-backup-${toISODate(new Date())}.json`;
-  const file = new File([JSON.stringify(payload, null, 2)], filename, {
+  const file = new File([JSON.stringify(payload, null, 2)], BACKUP_FILENAME, {
     type: 'application/json',
   });
   if (typeof navigator.canShare === 'function' && !navigator.canShare({ files: [file] })) {
@@ -482,22 +540,6 @@ export async function shareBackupToICloudOrFiles(
     files: [file],
   });
   return true;
-}
-
-export const AUTO_BACKUP_FILENAME = 'miciomiao-backup-automatico.json';
-
-export function downloadFixedNightlyBackupFile(payload: AgendaVoceBackupPayload): string {
-  const jsonStr = JSON.stringify(payload, null, 2);
-  const blob = new Blob([jsonStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = AUTO_BACKUP_FILENAME;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-  return AUTO_BACKUP_FILENAME;
 }
 
 const BACKUP_HANDLE_DB = 'miciomiao_file_handles_v1';
@@ -513,7 +555,6 @@ interface FileHandleLike {
   name?: string;
   createWritable?: () => Promise<WritableHandleLike>;
   queryPermission?: (opts: { mode: 'readwrite' }) => Promise<string>;
-  requestPermission?: (opts: { mode: 'readwrite' }) => Promise<string>;
 }
 
 function openHandleDb(): Promise<IDBDatabase> {
@@ -565,7 +606,7 @@ export async function pickLinkedAutoBackupFile(
     }
   ).showSaveFilePicker;
   const handle = await picker({
-    suggestedName: AUTO_BACKUP_FILENAME,
+    suggestedName: BACKUP_FILENAME,
     types: [
       {
         description: 'Backup JSON MicioMiao',
@@ -585,7 +626,7 @@ export async function pickLinkedAutoBackupFile(
     await writable.write(JSON.stringify(initialPayload, null, 2));
     await writable.close();
   }
-  return handle.name || AUTO_BACKUP_FILENAME;
+  return handle.name || BACKUP_FILENAME;
 }
 
 export async function clearLinkedAutoBackupFile(): Promise<void> {
@@ -628,21 +669,3 @@ export async function writeAutoBackupToLinkedFile(
     return false;
   }
 }
-
-export async function syncNightlyBackupToServer(
-  token: string,
-  payload: AgendaVoceBackupPayload
-): Promise<boolean> {
-  if (!isValidAutoBackupToken(token)) return false;
-  try {
-    const res = await fetch(`/api/backup/${encodeURIComponent(token)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-

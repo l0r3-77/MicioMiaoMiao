@@ -3,9 +3,11 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarPlus,
+  Check,
   CheckCircle2,
   Circle,
   ClipboardPaste,
+  Copy,
   GripVertical,
   Loader2,
   Mic,
@@ -18,10 +20,8 @@ import {
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import type {
   DayPhaseKey,
-  OrganizeNoteItem,
   TodoBlockKey,
   TodoNoteItem,
-  WidgetConfig,
 } from '../types/dailyTodo';
 import {
   DAY_PHASES,
@@ -29,6 +29,7 @@ import {
   TODO_BLOCKS,
 } from '../utils/dailyTodoStorage';
 import {
+  copyTextToClipboard,
   parsePastedLinesSingleRow,
   readClipboardTextDirect,
 } from '../utils/clipboardHelper';
@@ -46,15 +47,10 @@ import {
   CustomizableSectionStack,
   type CustomizableBlockItem,
 } from './CustomizableSectionStack';
-import { IPhoneWidgetStudio } from './IPhoneWidgetStudio';
 
 interface DaFareSubsectionProps {
   todoItems: TodoNoteItem[];
-  organizeItems: OrganizeNoteItem[];
   sectionLayout: SectionLayoutState;
-  widgetConfig: WidgetConfig;
-  widgetSyncStatus: 'idle' | 'syncing' | 'synced' | 'error';
-  widgetLastSyncedAt: string | null;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddTodo: (item: TodoNoteItem) => void;
@@ -74,21 +70,12 @@ interface DaFareSubsectionProps {
     phase: DayPhaseKey,
     removeFromTodo: boolean
   ) => void;
-  onChangeWidgetConfig: (patch: Partial<WidgetConfig>) => void;
-  onForceSyncWidget: () => void;
-  openWidgetHomeTrigger?: number;
-  onActivateDirectHomeWidget?: () => void;
-  onToggleOrganizeDone: (id: string) => void;
   onNotify: (msg: string) => void;
 }
 
 export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   todoItems,
-  organizeItems,
   sectionLayout,
-  widgetConfig,
-  widgetSyncStatus,
-  widgetLastSyncedAt,
   onChangeLayout,
   onResetLayout,
   onAddTodo,
@@ -99,11 +86,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   onMergeTodos,
   onMoveTodoStep,
   onSendTodoToOrganize,
-  onChangeWidgetConfig,
-  onForceSyncWidget,
-  openWidgetHomeTrigger = 0,
-  onActivateDirectHomeWidget,
-  onToggleOrganizeDone,
   onNotify,
 }) => {
   const [composerBlock, setComposerBlock] = useState<TodoBlockKey>('poi');
@@ -112,6 +94,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   const [showComposerCatPicker, setShowComposerCatPicker] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [copiedBlockKey, setCopiedBlockKey] = useState<TodoBlockKey | null>(null);
 
   // Batch Paste Modal for any block
   const [pasteBlock, setPasteBlock] = useState<TodoBlockKey | null>(null);
@@ -488,6 +471,26 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
     window.setTimeout(() => textInputRef.current?.focus(), 180);
   };
 
+  const handleCopyBlockNotes = async (blockKey: TodoBlockKey) => {
+    const items = itemsByBlock[blockKey] || [];
+    const lines = items.map((i) => i.text.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      onNotify(`Nessuna nota da copiare in «${TODO_BLOCK_MAP[blockKey].title}»`);
+      return;
+    }
+    const ok = await copyTextToClipboard(lines.join('\n'));
+    if (ok) {
+      setCopiedBlockKey(blockKey);
+      window.setTimeout(
+        () => setCopiedBlockKey((prev) => (prev === blockKey ? null : prev)),
+        1800
+      );
+      onNotify(`Note di «${TODO_BLOCK_MAP[blockKey].title}» copiate negli appunti`);
+    } else {
+      onNotify('Copia non consentita dal browser');
+    }
+  };
+
   const renderTodoBlockCard = (blockKey: TodoBlockKey) => {
     const meta = TODO_BLOCK_MAP[blockKey];
     const items = itemsByBlock[blockKey];
@@ -542,13 +545,26 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           <div className="flex items-center gap-1 shrink-0 ml-auto">
             <button
               type="button"
+              onClick={() => handleCopyBlockNotes(blockKey)}
+              aria-label={`Copia note di ${meta.title}`}
+              title={`Copia tutte le note di ${meta.title}`}
+              className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] text-[#083B37] hover:bg-[#C7EFE6] hover:border-[#0E8A7E] transition-colors"
+            >
+              {copiedBlockKey === blockKey ? (
+                <Check className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+              ) : (
+                <Copy className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleOpenPasteModal(blockKey)}
               aria-label={`Incolla più note in ${meta.title}`}
               title="Incolla da appunti (1 riga = 1 nota)"
-              className="min-h-[28px] inline-flex items-center gap-1 rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] px-1.5 py-0.5 text-[10.5px] font-semibold text-[#083B37] hover:bg-[#C7EFE6] hover:border-[#0E8A7E] transition-colors whitespace-nowrap"
+              className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] text-[#083B37] hover:bg-[#C7EFE6] hover:border-[#0E8A7E] transition-colors"
             >
-              <ClipboardPaste className="h-3 w-3 text-[#0F766E]" aria-hidden="true" />
-              <span>Incolla</span>
+              <ClipboardPaste className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
             </button>
 
             <button
@@ -935,30 +951,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
     {
       id: 'todo_poi_poi',
       render: () => renderTodoBlockCard('poi_poi'),
-    },
-    {
-      id: 'todo_widget',
-      render: () => (
-        <IPhoneWidgetStudio
-          config={widgetConfig}
-          todoItems={todoItems}
-          organizeItems={organizeItems}
-          syncStatus={widgetSyncStatus}
-          lastSyncedAt={widgetLastSyncedAt}
-          openHomeTrigger={openWidgetHomeTrigger}
-          onChangeConfig={onChangeWidgetConfig}
-          onForceSync={onForceSyncWidget}
-          onActivateDirectHomeWidget={onActivateDirectHomeWidget}
-          onToggleTodoDone={(id) => {
-            const target = todoItems.find((t) => t.id === id);
-            if (target) {
-              onUpdateTodo(id, { done: !target.done, updatedAt: new Date().toISOString() });
-            }
-          }}
-          onToggleOrganizeDone={onToggleOrganizeDone}
-          onNotify={onNotify}
-        />
-      ),
     },
   ];
 

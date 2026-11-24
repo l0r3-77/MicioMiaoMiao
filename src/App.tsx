@@ -20,7 +20,6 @@ import {
   type CustomizableBlockItem,
 } from './components/CustomizableSectionStack';
 import { DailyTodoSection, type TodoSubTab } from './components/DailyTodoSection';
-import { StandaloneIPhoneWidgetView } from './components/IPhoneWidgetStudio';
 import { DailyNoteCard } from './components/NoteCard';
 import { NoteEditorModal } from './components/NoteEditorModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -30,37 +29,22 @@ import { RemindersView } from './components/RemindersView';
 import { SettingsView } from './components/SettingsView';
 import { StatsAndChartsView } from './components/StatsAndChartsView';
 import { VoiceRecorderPanel } from './components/VoiceRecorderPanel';
-import type {
-  OrganizeNoteItem,
-  TodoNoteItem,
-  WidgetConfig,
-  WidgetSizePreset,
-  WidgetSourceKey,
-} from './types/dailyTodo';
+import type { OrganizeNoteItem, TodoNoteItem } from './types/dailyTodo';
 import type { AgendaViewMode, DailyNote, NoteColor, NoteEntry } from './types/note';
 import { loadAppSettings, saveAppSettings, type AppSettings } from './utils/appSettings';
 import { deleteAudioClip } from './utils/audioStorage';
 import {
-  fetchWidgetSnapshotStateFromServer,
-  getTodoOrganizeUpdatedAt,
-  hydrateOrganizeItemsFromRemote,
-  hydrateTodoItemsFromRemote,
   loadOrganizeItems,
   loadTodoItems,
-  loadWidgetConfig,
   saveOrganizeItems,
   saveTodoItems,
-  saveWidgetConfig,
-  setTodoOrganizeUpdatedAt,
-  syncWidgetSnapshotToServer,
 } from './utils/dailyTodoStorage';
 import {
-  AUTO_BACKUP_FILENAME,
+  BACKUP_FILENAME,
   buildBackupPayload,
-  downloadFixedNightlyBackupFile,
+  downloadBackupJsonFile,
   mergeDailyNotesFromBackup,
   restoreAudioClipsFromBackup,
-  syncNightlyBackupToServer,
   writeAutoBackupToLinkedFile,
   type AgendaVoceBackupPayload,
 } from './utils/backupService';
@@ -257,60 +241,17 @@ function dailyNoteMatchesFilters(
 export default function App() {
   const initialUrlParams = useMemo(() => {
     if (typeof window === 'undefined') {
-      return {
-        isWidget: false,
-        section: null as string | null,
-        source: null as WidgetSourceKey | null,
-        size: null as WidgetSizePreset | null,
-        token: null as string | null,
-      };
+      return { section: null as string | null };
     }
     const params = new URLSearchParams(window.location.search);
-    const rawSource = params.get('source');
-    const validSource: WidgetSourceKey | null =
-      rawSource === 'today' ||
-      rawSource === 'poi' ||
-      rawSource === 'svaghi' ||
-      rawSource === 'bollette' ||
-      rawSource === 'poi_poi'
-        ? rawSource
-        : null;
-    const rawSize = params.get('size');
-    const validSize: WidgetSizePreset | null =
-      rawSize === 'small' || rawSize === 'medium' || rawSize === 'large' ? rawSize : null;
-    const rawToken = params.get('token');
-    const validToken =
-      rawToken && /^[a-zA-Z0-9_-]{12,64}$/.test(rawToken) ? rawToken : null;
     return {
-      isWidget: params.get('widget') === '1',
       section: params.get('section'),
-      source: validSource,
-      size: validSize,
-      token: validToken,
     };
   }, []);
 
-  const [isWidgetStandalone, setIsWidgetStandalone] = useState(initialUrlParams.isWidget);
-  const [standaloneSource, setStandaloneSource] = useState<WidgetSourceKey | null>(
-    initialUrlParams.source
-  );
-  const [standaloneSize, setStandaloneSize] = useState<WidgetSizePreset | null>(
-    initialUrlParams.size
-  );
   const [dailyNotes, setDailyNotes] = useState<DailyNote[]>(loadStoredDailyNotes);
   const [todoItems, setTodoItems] = useState<TodoNoteItem[]>(loadTodoItems);
   const [organizeItems, setOrganizeItems] = useState<OrganizeNoteItem[]>(loadOrganizeItems);
-  const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>(() => {
-    const base = loadWidgetConfig();
-    if (initialUrlParams.token && initialUrlParams.isWidget) {
-      return { ...base, token: initialUrlParams.token };
-    }
-    return base;
-  });
-  const [widgetSyncStatus, setWidgetSyncStatus] = useState<
-    'idle' | 'syncing' | 'synced' | 'error'
-  >('idle');
-  const [widgetLastSyncedAt, setWidgetLastSyncedAt] = useState<string | null>(null);
 
   const [selectedDate, setSelectedDate] = useState<string>(() => toISODate(new Date()));
   const [agendaMode, setAgendaMode] = useState<AgendaViewMode>('day');
@@ -338,18 +279,20 @@ export default function App() {
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const activeWidgetToken =
-    (isWidgetStandalone && initialUrlParams.token) || widgetConfig.token;
-  const hasInitialWidgetHydratedRef = useRef(false);
-  const isApplyingRemoteWidgetRef = useRef(false);
-  const didFirstTodoOrgPersistRef = useRef(false);
-  const localTodoOrgUpdatedAtRef = useRef<string>(getTodoOrganizeUpdatedAt() || '');
+  const hiddenAtRef = useRef<number | null>(null);
+  const autoBackupRunningRef = useRef(false);
+  const lastBackedUpSignatureRef = useRef<string>('');
+  const lastAutoBackupAtMsRef = useRef<number>(0);
+  const dailyNotesRef = useRef(dailyNotes);
+  dailyNotesRef.current = dailyNotes;
   const todoItemsRef = useRef(todoItems);
   todoItemsRef.current = todoItems;
   const organizeItemsRef = useRef(organizeItems);
   organizeItemsRef.current = organizeItems;
-  const hiddenAtRef = useRef<number | null>(null);
-  const autoBackupRunningRef = useRef(false);
+  const layoutsRef = useRef(layouts);
+  layoutsRef.current = layouts;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   useEffect(() => {
     try {
@@ -367,122 +310,7 @@ export default function App() {
     saveOrganizeItems(organizeItems);
   }, [organizeItems]);
 
-  useEffect(() => {
-    if (!didFirstTodoOrgPersistRef.current) {
-      didFirstTodoOrgPersistRef.current = true;
-      return;
-    }
-    if (isApplyingRemoteWidgetRef.current) return;
-    const nowIso = new Date().toISOString();
-    localTodoOrgUpdatedAtRef.current = nowIso;
-    setTodoOrganizeUpdatedAt(nowIso);
-  }, [todoItems, organizeItems]);
 
-  useEffect(() => {
-    saveWidgetConfig(widgetConfig);
-  }, [widgetConfig]);
-
-  const pullRemoteWidgetState = useCallback(
-    async (forceAdoptIfEmpty = false) => {
-      if (!activeWidgetToken) return;
-      setWidgetSyncStatus('syncing');
-      const remote = await fetchWidgetSnapshotStateFromServer(activeWidgetToken);
-      if (!remote) {
-        setWidgetSyncStatus((prev) => (prev === 'syncing' ? 'synced' : prev));
-        return;
-      }
-      const localTs = localTodoOrgUpdatedAtRef.current;
-      const isLocalEmpty =
-        todoItemsRef.current.length === 0 && organizeItemsRef.current.length === 0;
-      const shouldAdopt =
-        remote.exists &&
-        (remote.updatedAt > localTs || (forceAdoptIfEmpty && isLocalEmpty));
-
-      if (shouldAdopt) {
-        const nowIso = remote.updatedAt || new Date().toISOString();
-        isApplyingRemoteWidgetRef.current = true;
-        localTodoOrgUpdatedAtRef.current = nowIso;
-        setTodoOrganizeUpdatedAt(nowIso);
-        setTodoItems(
-          hydrateTodoItemsFromRemote(remote.todoItems, todoItemsRef.current, nowIso)
-        );
-        setOrganizeItems(
-          hydrateOrganizeItemsFromRemote(remote.organizeItems, organizeItemsRef.current, nowIso)
-        );
-        window.setTimeout(() => {
-          isApplyingRemoteWidgetRef.current = false;
-        }, 0);
-      }
-      setWidgetSyncStatus('synced');
-      setWidgetLastSyncedAt(getCurrentTimeHHMM());
-    },
-    [activeWidgetToken]
-  );
-
-  // Initial pull before allowing PUT push so standalone WebClip never clobbers real tasks
-  useEffect(() => {
-    let active = true;
-    hasInitialWidgetHydratedRef.current = false;
-    (async () => {
-      await pullRemoteWidgetState(true);
-      if (!active) return;
-      hasInitialWidgetHydratedRef.current = true;
-    })();
-    return () => {
-      active = false;
-    };
-  }, [pullRemoteWidgetState]);
-
-  // Push local Todo/Organize changes to widget endpoint after initial hydration
-  useEffect(() => {
-    if (!hasInitialWidgetHydratedRef.current) return;
-    if (isApplyingRemoteWidgetRef.current) return;
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      setWidgetSyncStatus('syncing');
-      const syncedIso = await syncWidgetSnapshotToServer(
-        activeWidgetToken,
-        todoItems,
-        organizeItems,
-        localTodoOrgUpdatedAtRef.current || undefined
-      );
-      if (cancelled) return;
-      if (syncedIso) {
-        localTodoOrgUpdatedAtRef.current = syncedIso;
-        setTodoOrganizeUpdatedAt(syncedIso);
-        setWidgetSyncStatus('synced');
-        setWidgetLastSyncedAt(getCurrentTimeHHMM());
-      } else {
-        setWidgetSyncStatus('error');
-      }
-    }, 300);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [activeWidgetToken, todoItems, organizeItems]);
-
-  // Pull widget state when returning to foreground / focus, plus poll in standalone widget
-  useEffect(() => {
-    const onFocusOrVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void pullRemoteWidgetState(isWidgetStandalone);
-      }
-    };
-    window.addEventListener('focus', onFocusOrVisible);
-    document.addEventListener('visibilitychange', onFocusOrVisible);
-    let intervalId: number | undefined;
-    if (isWidgetStandalone) {
-      intervalId = window.setInterval(() => {
-        void pullRemoteWidgetState(true);
-      }, 15000);
-    }
-    return () => {
-      window.removeEventListener('focus', onFocusOrVisible);
-      document.removeEventListener('visibilitychange', onFocusOrVisible);
-      if (intervalId) window.clearInterval(intervalId);
-    };
-  }, [isWidgetStandalone, pullRemoteWidgetState]);
 
   // Refresh companion quote also when resuming iOS PWA after being backgrounded (>= 30s)
   useEffect(() => {
@@ -506,116 +334,96 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', onVisChange);
   }, []);
 
-  // Debounced sync of full backup JSON to server for autonomous iPhone nightly Shortcuts overwrite
-  useEffect(() => {
-    if (isWidgetStandalone) return;
-    if (!settings.autoNightlyBackupEnabled || !settings.autoBackupToken) return;
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      try {
-        const payload = await buildBackupPayload(
-          dailyNotes,
-          layouts,
-          settings.includeAudioInBackup,
-          todoItems,
-          organizeItems,
-          settings,
-          widgetConfig
-        );
-        if (!cancelled) {
-          await syncNightlyBackupToServer(settings.autoBackupToken, payload);
-        }
-      } catch {
-        // ignore background sync errors
-      }
-    }, 2500);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [
-    isWidgetStandalone,
-    settings.autoNightlyBackupEnabled,
-    settings.autoBackupToken,
-    settings.includeAudioInBackup,
-    dailyNotes,
-    todoItems,
-    organizeItems,
-    layouts,
-    widgetConfig,
-  ]);
+  const computeBackupSignature = useCallback(() => {
+    const dn = dailyNotesRef.current
+      .map((d) => `${d.date}:${d.updatedAt}:${d.entries.length}`)
+      .join('|');
+    const td = todoItemsRef.current.map((t) => `${t.id}:${t.updatedAt}:${t.done ? 1 : 0}`).join('|');
+    const og = organizeItemsRef.current
+      .map((o) => `${o.id}:${o.updatedAt}:${o.done ? 1 : 0}`)
+      .join('|');
+    return `${dn}##${td}##${og}`;
+  }, []);
 
-  // Automatic nightly backup check when app is open/opened past configured night hour
-  useEffect(() => {
-    if (isWidgetStandalone) return;
-    if (!settings.autoNightlyBackupEnabled) return;
-
-    const checkAndRunNightlyBackup = async () => {
+  const triggerAutomaticBackup = useCallback(
+    async (reason: 'open' | 'close') => {
       if (autoBackupRunningRef.current) return;
-      const now = new Date();
-      const todayIso = toISODate(now);
-      if (settings.lastAutoBackupDate === todayIso) return;
-      if (now.getHours() < settings.autoNightlyBackupHour) return;
-      const hasAnyData =
-        dailyNotes.length > 0 || todoItems.length > 0 || organizeItems.length > 0;
-      if (!hasAnyData) return;
+      if (!settingsRef.current.autoBackupOnOpenClose) return;
+      const curDaily = dailyNotesRef.current;
+      const curTodo = todoItemsRef.current;
+      const curOrg = organizeItemsRef.current;
+      if (curDaily.length === 0 && curTodo.length === 0 && curOrg.length === 0) return;
+
+      const sig = computeBackupSignature();
+      if (reason === 'close' && sig === lastBackedUpSignatureRef.current) return;
+      if (Date.now() - lastAutoBackupAtMsRef.current < 5000) return;
 
       autoBackupRunningRef.current = true;
+      lastAutoBackupAtMsRef.current = Date.now();
+      lastBackedUpSignatureRef.current = sig;
       try {
         const payload = await buildBackupPayload(
-          dailyNotes,
-          layouts,
-          settings.includeAudioInBackup,
-          todoItems,
-          organizeItems,
-          settings,
-          widgetConfig
+          curDaily,
+          layoutsRef.current,
+          settingsRef.current.includeAudioInBackup,
+          curTodo,
+          curOrg,
+          settingsRef.current
         );
-        await syncNightlyBackupToServer(settings.autoBackupToken, payload);
         const overwrote = await writeAutoBackupToLinkedFile(payload);
         if (!overwrote) {
-          downloadFixedNightlyBackupFile(payload);
+          downloadBackupJsonFile(payload);
         }
-        setSettings((prev) => ({
-          ...prev,
-          lastAutoBackupDate: todayIso,
-          lastAutoBackupAt: now.toISOString(),
-        }));
-        setToastMessage(
-          overwrote
-            ? `Backup notturno aggiornato (${AUTO_BACKUP_FILENAME})`
-            : `Backup notturno salvato (${AUTO_BACKUP_FILENAME})`
-        );
+        if (reason === 'open') {
+          setToastMessage(`Backup automatico salvato (${BACKUP_FILENAME})`);
+        }
       } catch {
-        // ignore silent failure
+        // ignore silent background backup failures
       } finally {
         autoBackupRunningRef.current = false;
       }
+    },
+    [computeBackupSignature]
+  );
+
+  // Automatic backup on app open (once per launch session) & on app close/hide when data changed
+  useEffect(() => {
+    if (!settings.autoBackupOnOpenClose) return;
+    let openTimer: number | undefined;
+    try {
+      if (sessionStorage.getItem('miciomiao_open_backup_done') !== '1') {
+        openTimer = window.setTimeout(() => {
+          try {
+            sessionStorage.setItem('miciomiao_open_backup_done', '1');
+          } catch {
+            // ignore sessionStorage restrictions
+          }
+          void triggerAutomaticBackup('open');
+        }, 1200);
+      }
+    } catch {
+      openTimer = window.setTimeout(() => {
+        void triggerAutomaticBackup('open');
+      }, 1200);
+    }
+
+    const onVisibilityLeave = () => {
+      if (document.visibilityState === 'hidden') {
+        void triggerAutomaticBackup('close');
+      }
+    };
+    const onPageHide = () => {
+      void triggerAutomaticBackup('close');
     };
 
-    const initialTimer = window.setTimeout(() => {
-      void checkAndRunNightlyBackup();
-    }, 3500);
-    const periodicTimer = window.setInterval(() => {
-      void checkAndRunNightlyBackup();
-    }, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', onVisibilityLeave);
+    window.addEventListener('pagehide', onPageHide);
     return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(periodicTimer);
+      if (openTimer) window.clearTimeout(openTimer);
+      document.removeEventListener('visibilitychange', onVisibilityLeave);
+      window.removeEventListener('pagehide', onPageHide);
     };
-  }, [
-    isWidgetStandalone,
-    settings.autoNightlyBackupEnabled,
-    settings.autoNightlyBackupHour,
-    settings.lastAutoBackupDate,
-    settings.autoBackupToken,
-    settings.includeAudioInBackup,
-    dailyNotes,
-    todoItems,
-    organizeItems,
-    layouts,
-    widgetConfig,
-  ]);
+  }, [settings.autoBackupOnOpenClose, triggerAutomaticBackup]);
 
   useEffect(() => {
     saveAllLayoutPreferences(layouts);
@@ -627,32 +435,18 @@ export default function App() {
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const activeSource = standaloneSource || widgetConfig.source;
-    const titleSuffixMap: Record<WidgetSourceKey, string> = {
-      today: 'Oggi',
-      poi: 'Poi',
-      svaghi: 'Svaghi',
-      bollette: 'Bollette e pagamenti',
-      poi_poi: 'Poi poi',
-    };
-    const nextTitle = isWidgetStandalone
-      ? `MicioMiao Widget · ${titleSuffixMap[activeSource]}`
-      : 'MicioMiao — Note Vocali & Agenda iOS';
-    document.title = nextTitle;
+    document.title = 'MicioMiao — Note Vocali & Agenda iOS';
 
     const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (appleTitleMeta) {
-      appleTitleMeta.setAttribute(
-        'content',
-        isWidgetStandalone ? `MicioMiao · ${titleSuffixMap[activeSource]}` : 'MicioMiao'
-      );
+      appleTitleMeta.setAttribute('content', 'MicioMiao');
     }
 
     const themeColorMeta = document.querySelector('meta[name="theme-color"]');
     if (themeColorMeta) {
-      themeColorMeta.setAttribute('content', isWidgetStandalone ? '#CCF3EC' : '#FAF7F0');
+      themeColorMeta.setAttribute('content', '#FAF7F0');
     }
-  }, [isWidgetStandalone, standaloneSource, widgetConfig.source]);
+  }, []);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -1028,9 +822,6 @@ export default function App() {
       if (payload.settings) {
         setSettings(payload.settings);
       }
-      if (payload.widgetConfig) {
-        setWidgetConfig(payload.widgetConfig);
-      }
       if (payload.statsPrefs) {
         try {
           localStorage.setItem('agendavoce_stats_prefs_v1', JSON.stringify(payload.statsPrefs));
@@ -1102,29 +893,7 @@ export default function App() {
     setToastMessage(`Backup ripristinato: ${parts.join(', ')}`);
   };
 
-  const handleForceSyncWidget = async () => {
-    setWidgetSyncStatus('syncing');
-    const syncedIso = await syncWidgetSnapshotToServer(
-      activeWidgetToken,
-      todoItems,
-      organizeItems,
-      localTodoOrgUpdatedAtRef.current || undefined
-    );
-    if (syncedIso) {
-      localTodoOrgUpdatedAtRef.current = syncedIso;
-      setTodoOrganizeUpdatedAt(syncedIso);
-      setWidgetSyncStatus('synced');
-      setWidgetLastSyncedAt(getCurrentTimeHHMM());
-      setToastMessage('Widget iPhone sincronizzato');
-    } else {
-      setWidgetSyncStatus('error');
-      setToastMessage('Impossibile sincronizzare il widget in questo momento');
-    }
-  };
 
-  const handleChangeWidgetConfig = (patch: Partial<WidgetConfig>) => {
-    setWidgetConfig((prev) => ({ ...prev, ...patch }));
-  };
 
   const selectDesktopAgendaMode = (mode: AgendaViewMode) => {
     setAgendaMode(mode);
@@ -1347,59 +1116,7 @@ export default function App() {
     },
   ];
 
-  if (isWidgetStandalone) {
-    const activeWidgetSource = standaloneSource || widgetConfig.source;
-    const activeWidgetSize = standaloneSize || widgetConfig.size;
-    const standaloneUrl =
-      typeof window !== 'undefined'
-        ? `${window.location.origin}/?widget=1&token=${encodeURIComponent(
-            activeWidgetToken
-          )}&source=${encodeURIComponent(activeWidgetSource)}&size=${encodeURIComponent(
-            activeWidgetSize
-          )}`
-        : '';
-    return (
-      <StandaloneIPhoneWidgetView
-        source={activeWidgetSource}
-        size={activeWidgetSize}
-        widgetUrl={standaloneUrl}
-        syncStatus={widgetSyncStatus}
-        lastSyncedAt={widgetLastSyncedAt}
-        todoItems={todoItems}
-        organizeItems={organizeItems}
-        onRefreshSync={() => void pullRemoteWidgetState(true)}
-        onToggleTodoDone={(id) =>
-          setTodoItems((prev) =>
-            prev.map((item) =>
-              item.id === id
-                ? { ...item, done: !item.done, updatedAt: new Date().toISOString() }
-                : item
-            )
-          )
-        }
-        onToggleOrganizeDone={(id) =>
-          setOrganizeItems((prev) =>
-            prev.map((item) =>
-              item.id === id
-                ? { ...item, done: !item.done, updatedAt: new Date().toISOString() }
-                : item
-            )
-          )
-        }
-        onOpenFullApp={() => {
-          if (typeof window !== 'undefined') {
-            window.history.replaceState({}, '', '/?section=todo');
-          }
-          setDesktopSection('todo');
-          setMobileTab('todo');
-          setTodoSubTab(activeWidgetSource === 'today' ? 'organizza' : 'da_fare');
-          setStandaloneSource(null);
-          setStandaloneSize(null);
-          setIsWidgetStandalone(false);
-        }}
-      />
-    );
-  }
+
 
   return (
     <div className="min-h-dvh bg-[#FAF7F0] text-stone-900 pb-20 lg:pb-10">
@@ -1733,7 +1450,6 @@ export default function App() {
                 dailyNotes={dailyNotes}
                 todoItems={todoItems}
                 organizeItems={organizeItems}
-                widgetConfig={widgetConfig}
                 layouts={layouts}
                 settings={settings}
                 sectionLayout={layouts.settings}
@@ -1752,29 +1468,10 @@ export default function App() {
                 organizeItems={organizeItems}
                 todoLayout={layouts.todo_list}
                 organizeLayout={layouts.organize}
-                widgetConfig={widgetConfig}
-                widgetSyncStatus={widgetSyncStatus}
-                widgetLastSyncedAt={widgetLastSyncedAt}
                 onChangeLayout={handleChangeLayout}
                 onResetLayout={handleResetLayout}
                 onSetTodoItems={setTodoItems}
                 onSetOrganizeItems={setOrganizeItems}
-                onChangeWidgetConfig={handleChangeWidgetConfig}
-                onForceSyncWidget={handleForceSyncWidget}
-                onActivateDirectWidgetMode={() => {
-                  if (typeof window !== 'undefined') {
-                    const nextUrl = `/?widget=1&token=${encodeURIComponent(
-                      widgetConfig.token
-                    )}&source=${encodeURIComponent(widgetConfig.source)}&size=${encodeURIComponent(
-                      widgetConfig.size
-                    )}`;
-                    window.history.pushState({}, '', nextUrl);
-                  }
-                  setStandaloneSource(widgetConfig.source);
-                  setStandaloneSize(widgetConfig.size);
-                  handleForceSyncWidget();
-                  setIsWidgetStandalone(true);
-                }}
                 onNotify={setToastMessage}
               />
             ) : showRemindersView ? (
