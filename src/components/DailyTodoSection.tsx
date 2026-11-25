@@ -252,6 +252,13 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           ? tText || sText
           : `${tText} · ${sText}`;
 
+      const keepReminder =
+        target.reminderDate && target.reminderTime
+          ? { reminderDate: target.reminderDate, reminderTime: target.reminderTime }
+          : source.reminderDate && source.reminderTime
+            ? { reminderDate: source.reminderDate, reminderTime: source.reminderTime }
+            : {};
+
       const withoutSource = prev
         .filter((i) => i.id !== sourceId)
         .map((i) =>
@@ -260,6 +267,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
                 ...i,
                 text: mergedText,
                 done: i.done && source.done,
+                ...keepReminder,
                 updatedAt: nowIso,
               }
             : i
@@ -335,6 +343,8 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
         order: maxOrder,
         source: todo.source,
         linkedTodoId: removeFromTodo ? undefined : todo.id,
+        ...(todo.reminderDate ? { reminderDate: todo.reminderDate } : {}),
+        ...(todo.reminderTime ? { reminderTime: todo.reminderTime } : {}),
         createdAt: nowIso,
         updatedAt: nowIso,
       };

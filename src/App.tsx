@@ -65,7 +65,7 @@ import {
 } from './utils/dailyCompanionQuotes';
 import { NOTE_COLOR_LIST, NOTE_COLORS, VALID_NOTE_COLORS } from './utils/noteColors';
 import { CHIBI_CAT_MASCOTS } from './utils/nekoCatalog';
-import { parseApiJsonSafe } from './utils/apiError';
+import { fetchApiJsonWithRetry } from './utils/apiError';
 import { publishQuotaSnapshot } from './utils/quotaTracker';
 import { extractRemindersLocally } from './utils/reminderExtractor';
 import { applyThemeToDocument, subscribeSystemThemeChanges } from './utils/themeSystem';
@@ -88,6 +88,27 @@ type MobileTab =
   | 'reminders'
   | 'todo'
   | 'settings';
+
+const MOBILE_SWIPE_ORDER: MobileTab[] = [
+  'record',
+  'agenda',
+  'stats',
+  'pinned',
+  'reminders',
+  'todo',
+  'settings',
+];
+
+const DESKTOP_SWIPE_ORDER: DesktopSection[] = [
+  'day',
+  'week',
+  'month',
+  'stats',
+  'pinned',
+  'reminders',
+  'todo',
+  'settings',
+];
 
 const LEGACY_COLOR_MAP: Record<string, NoteColor> = {
   lilac: 'sky',
@@ -733,16 +754,15 @@ export default function App() {
     if (!combinedText.trim()) return;
 
     try {
-      const res = await fetch('/api/notes/summarize-mood', {
+      const { response: res, data } = await fetchApiJsonWithRetry<{
+        bullets?: unknown;
+        quota?: unknown;
+        error?: string;
+      }>('/api/notes/summarize-mood', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: combinedText, isDailyOverview: true }),
       });
-      const data = await parseApiJsonSafe<{
-        bullets?: unknown;
-        quota?: unknown;
-        error?: string;
-      }>(res);
       if (data.quota) {
         publishQuotaSnapshot(data.quota);
       }
@@ -932,6 +952,116 @@ export default function App() {
     setDesktopSection(mode);
     setMobileTab('agenda');
     setTodoSubMenuOpen(false);
+  };
+
+  const swipeStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+
+  const navigateSectionBySwipe = (delta: -1 | 1) => {
+    const isDesktop =
+      typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
+
+    if (!isDesktop) {
+      const idx = MOBILE_SWIPE_ORDER.indexOf(mobileTab);
+      if (idx < 0) return;
+      const nextIdx = idx + delta;
+      if (nextIdx < 0 || nextIdx >= MOBILE_SWIPE_ORDER.length) return;
+      const nextTab = MOBILE_SWIPE_ORDER[nextIdx];
+      setTodoSubMenuOpen(false);
+      if (nextTab === 'record') {
+        setMobileTab('record');
+      } else if (nextTab === 'agenda') {
+        if (agendaMode === 'week') {
+          setSelectedDate(toISODate(new Date()));
+        }
+        setMobileTab('agenda');
+        if (
+          desktopSection === 'stats' ||
+          desktopSection === 'pinned' ||
+          desktopSection === 'reminders' ||
+          desktopSection === 'todo' ||
+          desktopSection === 'settings'
+        ) {
+          setDesktopSection(agendaMode);
+        }
+      } else if (nextTab === 'todo') {
+        setTodoSubTab('organizza');
+        setOrganizeFocusTodayKey((k) => k + 1);
+        setMobileTab('todo');
+        setDesktopSection('todo');
+      } else {
+        setMobileTab(nextTab);
+        setDesktopSection(nextTab);
+      }
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      return;
+    }
+
+    const dIdx = DESKTOP_SWIPE_ORDER.indexOf(desktopSection);
+    if (dIdx < 0) return;
+    const nextDIdx = dIdx + delta;
+    if (nextDIdx < 0 || nextDIdx >= DESKTOP_SWIPE_ORDER.length) return;
+    const nextSec = DESKTOP_SWIPE_ORDER[nextDIdx];
+    if (nextSec === 'day' || nextSec === 'week' || nextSec === 'month') {
+      selectDesktopAgendaMode(nextSec);
+    } else if (nextSec === 'todo') {
+      setTodoSubTab('organizza');
+      setOrganizeFocusTodayKey((k) => k + 1);
+      setDesktopSection('todo');
+      setMobileTab('todo');
+      setTodoSubMenuOpen(false);
+    } else {
+      setDesktopSection(nextSec);
+      setMobileTab(nextSec);
+      setTodoSubMenuOpen(false);
+    }
+  };
+
+  const handleWorkspaceTouchStart = (e: React.TouchEvent<HTMLElement>) => {
+    if (e.touches.length !== 1 || editingTarget || document.querySelector('[role="dialog"]')) {
+      swipeStartRef.current = null;
+      return;
+    }
+    const target = e.target as HTMLElement | null;
+    if (
+      !target ||
+      target.closest(
+        'input, textarea, select, [contenteditable="true"], [draggable="true"], [data-todo-merge-id], [data-org-merge-id], [data-org-insert-before], [data-todo-insert-before], .touch-none, [role="dialog"]'
+      )
+    ) {
+      swipeStartRef.current = null;
+      return;
+    }
+
+    // Do not hijack swipes inside horizontally scrollable strips/charts
+    let el: HTMLElement | null = target;
+    while (el && el !== e.currentTarget) {
+      if (el.scrollWidth > el.clientWidth + 6) {
+        const overflowX = window.getComputedStyle(el).overflowX;
+        if (overflowX === 'auto' || overflowX === 'scroll') {
+          swipeStartRef.current = null;
+          return;
+        }
+      }
+      el = el.parentElement;
+    }
+
+    const touch = e.touches[0];
+    swipeStartRef.current = { x: touch.clientX, y: touch.clientY, t: Date.now() };
+  };
+
+  const handleWorkspaceTouchEnd = (e: React.TouchEvent<HTMLElement>) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start || e.changedTouches.length !== 1) return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    const dt = Date.now() - start.t;
+    if (dt > 650) return;
+    if (Math.abs(dx) < 64 || Math.abs(dy) > 55) return;
+    if (Math.abs(dx) < Math.abs(dy) * 1.45) return;
+
+    navigateSectionBySwipe(dx < 0 ? 1 : -1);
   };
 
   const showSettingsView = mobileTab === 'settings' || desktopSection === 'settings';
@@ -1375,8 +1505,16 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Responsive Workspace */}
-      <main id="top" className="mx-auto max-w-7xl px-4 sm:px-6 py-4 sm:py-6">
+      {/* Main Responsive Workspace (supports horizontal swipe navigation across sections) */}
+      <main
+        id="top"
+        onTouchStart={handleWorkspaceTouchStart}
+        onTouchEnd={handleWorkspaceTouchEnd}
+        onTouchCancel={() => {
+          swipeStartRef.current = null;
+        }}
+        className="mx-auto max-w-7xl min-h-[calc(100dvh-7.5rem)] px-4 sm:px-6 py-4 sm:py-6"
+      >
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Studio Column: Customizable Sidebar Blocks (Landing screen on Mobile!) */}
           <aside

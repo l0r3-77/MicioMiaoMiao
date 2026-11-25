@@ -33,6 +33,8 @@ export interface OrganizeNoteItem {
   source: 'voice' | 'text';
   audioMetadata?: AudioMetadata;
   linkedTodoId?: string;
+  reminderDate?: string; // YYYY-MM-DD
+  reminderTime?: string; // HH:MM
   createdAt: string;
   updatedAt: string;
 }

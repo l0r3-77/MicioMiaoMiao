@@ -30,7 +30,7 @@ import {
   TODO_BLOCKS,
   buildGoogleCalendarUrl,
 } from '../utils/dailyTodoStorage';
-import { parseApiJsonSafe } from '../utils/apiError';
+import { fetchApiJsonWithRetry } from '../utils/apiError';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import {
   copyTextToClipboard,
@@ -46,6 +46,7 @@ import {
 import { formatDuration, toISODate } from '../utils/dateUtils';
 import type { LayoutSectionKey, SectionLayoutState } from '../utils/layoutPreferences';
 import { publishQuotaSnapshot } from '../utils/quotaTracker';
+import { fetchTranscribeWithDebug } from '../utils/transcribeDebugLog';
 import { CatEmoticonIcon, CatEmoticonPicker } from './CatEmoticon';
 import {
   CustomizableSectionStack,
@@ -303,24 +304,27 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
     if (!rec) return;
 
     setIsTranscribing(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 90000);
     const stopKeepAlive = startBackgroundSession('Trascrizione nota in corso');
     try {
-      const res = await fetch('/api/notes/transcribe-todo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioBase64: rec.base64,
-          mimeType: rec.mimeType,
-        }),
-      });
-      const data = await parseApiJsonSafe<{
+      const { ok, data } = await fetchTranscribeWithDebug<{
         text?: string;
         emoji?: string;
         quota?: unknown;
         error?: string;
-      }>(res);
+      }>({
+        endpoint: '/api/notes/transcribe-todo',
+        caller: 'DaFareSubsection',
+        signal: controller.signal,
+        micDiagnostics: rec.diagnostics,
+        payload: {
+          audioBase64: rec.base64,
+          mimeType: rec.mimeType,
+        },
+      });
       if (data.quota) publishQuotaSnapshot(data.quota);
-      if (!res.ok || !data.text?.trim()) {
+      if (!ok || !data.text?.trim()) {
         setComposerError(
           data.error || 'Impossibile trascrivere la nota. Riprova o scrivila a mano.'
         );
@@ -352,9 +356,14 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       setManualCatEmoticon(null);
       setShowComposerCatPicker(false);
       onNotify(`Nota trascritta in «${TODO_BLOCK_MAP[composerBlock].title}»`);
-    } catch {
-      setComposerError('Errore di rete durante la trascrizione.');
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') {
+        setComposerError('Tempo di attesa scaduto durante la trascrizione. Riprova tra poco.');
+      } else {
+        setComposerError('Errore di rete durante la trascrizione.');
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       stopKeepAlive();
       setIsTranscribing(false);
     }
@@ -424,15 +433,14 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
     try {
       let emojiSuggestions: string[] = [];
       try {
-        const res = await fetch('/api/notes/parse-batch-todos', {
+        const { data } = await fetchApiJsonWithRetry<{
+          items?: Array<{ text?: string; emoji?: string }>;
+          quota?: unknown;
+        }>('/api/notes/parse-batch-todos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ rawText: strictLines.join('\n') }),
         });
-        const data = await parseApiJsonSafe<{
-          items?: Array<{ text?: string; emoji?: string }>;
-          quota?: unknown;
-        }>(res);
         if (data.quota) publishQuotaSnapshot(data.quota);
         if (Array.isArray(data.items) && data.items.length === strictLines.length) {
           emojiSuggestions = data.items.map((it) =>

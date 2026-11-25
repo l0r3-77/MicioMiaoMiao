@@ -33,6 +33,7 @@ import {
   DAY_PHASE_MAP,
   DAY_PHASES,
   TODO_BLOCKS,
+  buildGoogleCalendarUrl,
 } from '../utils/dailyTodoStorage';
 import {
   copyTextToClipboard,
@@ -53,9 +54,10 @@ import {
   toISODate,
 } from '../utils/dateUtils';
 import type { LayoutSectionKey, SectionLayoutState } from '../utils/layoutPreferences';
-import { parseApiJsonSafe } from '../utils/apiError';
+import { fetchApiJsonWithRetry } from '../utils/apiError';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import { publishQuotaSnapshot } from '../utils/quotaTracker';
+import { fetchTranscribeWithDebug } from '../utils/transcribeDebugLog';
 import { CatEmoticonIcon, CatEmoticonPicker } from './CatEmoticon';
 import {
   CustomizableSectionStack,
@@ -129,12 +131,17 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   const [manualNewCat, setManualNewCat] = useState<CatEmoticonId | null>(null);
   const [showNewCatPicker, setShowNewCatPicker] = useState(false);
   const [newModalError, setNewModalError] = useState<string | null>(null);
+  const [newModalRemDate, setNewModalRemDate] = useState('');
+  const [newModalRemTime, setNewModalRemTime] = useState('');
+  const [showNewRemFields, setShowNewRemFields] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [removePickedTodo, setRemovePickedTodo] = useState(false);
 
   // Compact Edit Existing Note Modal
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [editDraftText, setEditDraftText] = useState('');
+  const [editRemDate, setEditRemDate] = useState('');
+  const [editRemTime, setEditRemTime] = useState('');
   const [showEditCatPicker, setShowEditCatPicker] = useState(false);
 
   // Batch Paste Modal for any day in Organizza
@@ -203,6 +210,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   useEffect(() => {
     if (selectedOrgItem) {
       setEditDraftText(selectedOrgItem.text);
+      setEditRemDate(selectedOrgItem.reminderDate || '');
+      setEditRemTime(selectedOrgItem.reminderTime || '');
       setShowEditCatPicker(false);
     }
   }, [selectedOrgItem?.id]);
@@ -400,6 +409,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     setNewModalText('');
     setManualNewCat(null);
     setShowNewCatPicker(false);
+    setNewModalRemDate('');
+    setNewModalRemTime('');
+    setShowNewRemFields(false);
     setNewModalError(null);
     setNewModalTab('create');
     clearMicError();
@@ -438,6 +450,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       done: false,
       order: nextOrderForSlot(newModalDate, newModalPhase),
       source: 'text',
+      ...(newModalRemDate ? { reminderDate: newModalRemDate } : {}),
+      ...(newModalRemTime ? { reminderTime: newModalRemTime } : {}),
       createdAt: nowIso,
       updatedAt: nowIso,
     };
@@ -455,24 +469,27 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     if (!rec) return;
 
     setIsTranscribing(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 90000);
     const stopSession = startBackgroundSession('Trascrizione nota vocale in corso');
     try {
-      const res = await fetch('/api/notes/transcribe-todo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioBase64: rec.base64,
-          mimeType: rec.mimeType,
-        }),
-      });
-      const data = await parseApiJsonSafe<{
+      const { ok, data } = await fetchTranscribeWithDebug<{
         text?: string;
         emoji?: string;
         quota?: unknown;
         error?: string;
-      }>(res);
+      }>({
+        endpoint: '/api/notes/transcribe-todo',
+        caller: 'OrganizzaSubsection',
+        signal: controller.signal,
+        micDiagnostics: rec.diagnostics,
+        payload: {
+          audioBase64: rec.base64,
+          mimeType: rec.mimeType,
+        },
+      });
       if (data.quota) publishQuotaSnapshot(data.quota);
-      if (!res.ok || !data.text?.trim()) {
+      if (!ok || !data.text?.trim()) {
         setNewModalError(
           data.error ||
             'Impossibile trascrivere la registrazione. Riprova o scrivi a mano.'
@@ -498,6 +515,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         done: false,
         order: nextOrderForSlot(newModalDate, newModalPhase),
         source: 'voice',
+        ...(newModalRemDate ? { reminderDate: newModalRemDate } : {}),
+        ...(newModalRemTime ? { reminderTime: newModalRemTime } : {}),
         createdAt: nowIso,
         updatedAt: nowIso,
       };
@@ -506,9 +525,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       onNotify(
         `Nota trascritta (${formatItalianDateShort(newModalDate)} · ${DAY_PHASE_MAP[newModalPhase].title})`
       );
-    } catch {
-      setNewModalError('Errore di rete durante la trascrizione.');
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') {
+        setNewModalError('Tempo di attesa scaduto durante la trascrizione. Riprova tra poco.');
+      } else {
+        setNewModalError('Errore di rete durante la trascrizione.');
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       stopSession();
       setIsTranscribing(false);
     }
@@ -577,15 +601,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     try {
       let emojiSuggestions: string[] = [];
       try {
-        const res = await fetch('/api/notes/parse-batch-todos', {
+        const { data } = await fetchApiJsonWithRetry<{
+          items?: Array<{ text?: string; emoji?: string }>;
+          quota?: unknown;
+        }>('/api/notes/parse-batch-todos', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ rawText: strictLines.join('\n') }),
         });
-        const data = await parseApiJsonSafe<{
-          items?: Array<{ text?: string; emoji?: string }>;
-          quota?: unknown;
-        }>(res);
         if (data.quota) publishQuotaSnapshot(data.quota);
         if (Array.isArray(data.items) && data.items.length === strictLines.length) {
           emojiSuggestions = data.items.map((it) =>
@@ -966,6 +989,10 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                   draggedOrgId !== item.id &&
                                   dropTarget?.mergeTargetId === item.id;
                                 const catId = resolveCatEmoticonId(item.emoji, item.text);
+                                const hasReminder = Boolean(item.reminderDate && item.reminderTime);
+                                const remShort = hasReminder
+                                  ? `${item.reminderDate!.split('-')[2]}/${item.reminderDate!.split('-')[1]} ${item.reminderTime}`
+                                  : '';
 
                                 return (
                                   <React.Fragment key={item.id}>
@@ -1106,6 +1133,26 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                           {item.text}
                                         </span>
                                       </button>
+
+                                      {hasReminder && (
+                                        <a
+                                          href={buildGoogleCalendarUrl({
+                                            title: item.text,
+                                            details: `${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text}`,
+                                            date: item.reminderDate!,
+                                            time: item.reminderTime!,
+                                          })}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          onClick={(e) => e.stopPropagation()}
+                                          title={`Aggiungi a Google Calendar (${remShort})`}
+                                          aria-label={`Apri Google Calendar per ${item.text}`}
+                                          className="inline-flex items-center gap-1 rounded-md border border-[var(--todo-chip-border)] bg-[var(--todo-accent-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--todo-text)] hover:opacity-85 shrink-0"
+                                        >
+                                          <Calendar className="h-3 w-3 text-[var(--todo-accent)]" aria-hidden="true" />
+                                          <span className="font-mono tabular-nums">{remShort}</span>
+                                        </a>
+                                      )}
 
                                       {isMergeTarget && (
                                         <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
@@ -1329,6 +1376,59 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                       className="w-full rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] p-2 text-xs text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/60 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
                     />
 
+                    {/* Optional Reminder Toggle in New Note Modal */}
+                    <div className="rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] px-2 py-1.5 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!showNewRemFields && !newModalRemDate) {
+                              setNewModalRemDate(newModalDate);
+                            }
+                            setShowNewRemFields((v) => !v);
+                          }}
+                          className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-[var(--todo-text)] hover:opacity-80"
+                        >
+                          <Calendar className="h-3 w-3 text-[var(--todo-accent)]" aria-hidden="true" />
+                          <span>
+                            {newModalRemDate && newModalRemTime
+                              ? `Promemoria: ${newModalRemDate.split('-').reverse().slice(0, 2).join('/')} ${newModalRemTime}`
+                              : 'Imposta promemoria / Calendar'}
+                          </span>
+                        </button>
+                        {(newModalRemDate || newModalRemTime) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewModalRemDate('');
+                              setNewModalRemTime('');
+                            }}
+                            className="text-[10px] font-semibold text-[var(--todo-text-muted)] hover:underline"
+                          >
+                            Rimuovi
+                          </button>
+                        )}
+                      </div>
+                      {showNewRemFields && (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <input
+                            type="date"
+                            value={newModalRemDate}
+                            onChange={(e) => setNewModalRemDate(e.target.value)}
+                            aria-label="Data promemoria"
+                            className="block w-full max-w-full min-w-0 min-h-[30px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-0.5 text-[var(--todo-text)]"
+                          />
+                          <input
+                            type="time"
+                            value={newModalRemTime}
+                            onChange={(e) => setNewModalRemTime(e.target.value)}
+                            aria-label="Ora promemoria"
+                            className="block w-full max-w-full min-w-0 min-h-[30px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-0.5 text-[var(--todo-text)]"
+                          />
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
@@ -1539,6 +1639,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 if (!clean) return;
                 onUpdateOrganizeItem(selectedOrgItem.id, {
                   text: clean,
+                  reminderDate: editRemDate || undefined,
+                  reminderTime: editRemTime || undefined,
                   updatedAt: new Date().toISOString(),
                 });
                 setSelectedOrgId(null);
@@ -1559,6 +1661,71 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 Salva
               </button>
             </form>
+
+            {/* Reminder Date & Time + Google Calendar Event */}
+            <div className="rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] p-2 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[var(--todo-text)]">
+                  <Calendar className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
+                  Promemoria e Calendario
+                </span>
+                {(editRemDate || editRemTime) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditRemDate('');
+                      setEditRemTime('');
+                    }}
+                    className="text-[10px] font-semibold text-[var(--todo-text-muted)] hover:underline"
+                  >
+                    Rimuovi
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <input
+                  type="date"
+                  value={editRemDate}
+                  onChange={(e) => setEditRemDate(e.target.value)}
+                  aria-label="Data promemoria"
+                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-1 text-[var(--todo-text)]"
+                />
+                <input
+                  type="time"
+                  value={editRemTime}
+                  onChange={(e) => setEditRemTime(e.target.value)}
+                  aria-label="Ora promemoria"
+                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-1 text-[var(--todo-text)]"
+                />
+              </div>
+              {editRemDate && editRemTime && (
+                <a
+                  href={buildGoogleCalendarUrl({
+                    title: editDraftText.trim() || selectedOrgItem.text,
+                    details: `${formatItalianDateShort(selectedOrgItem.date)} · ${DAY_PHASE_MAP[selectedOrgItem.phase].title}: ${editDraftText.trim() || selectedOrgItem.text}`,
+                    date: editRemDate,
+                    time: editRemTime,
+                  })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    const clean = editDraftText.trim();
+                    if (clean) {
+                      onUpdateOrganizeItem(selectedOrgItem.id, {
+                        text: clean,
+                        reminderDate: editRemDate,
+                        reminderTime: editRemTime,
+                        updatedAt: new Date().toISOString(),
+                      });
+                    }
+                  }}
+                  className="w-full min-h-[32px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--todo-accent)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90"
+                >
+                  <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Apri Google Calendar</span>
+                </a>
+              )}
+            </div>
 
             <div className="grid grid-cols-1 gap-1.5 rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] p-2">
               <input

@@ -196,6 +196,14 @@ export function sanitizeOrganizeItems(raw: unknown): OrganizeNoteItem[] {
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
     .map((item, idx) => {
       const text = typeof item.text === 'string' ? item.text : '';
+      const reminderDate =
+        typeof item.reminderDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.reminderDate)
+          ? item.reminderDate
+          : undefined;
+      const reminderTime =
+        typeof item.reminderTime === 'string' && /^\d{2}:\d{2}$/.test(item.reminderTime)
+          ? item.reminderTime
+          : undefined;
       return {
         id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : crypto.randomUUID(),
         date:
@@ -213,6 +221,8 @@ export function sanitizeOrganizeItems(raw: unknown): OrganizeNoteItem[] {
         order: typeof item.order === 'number' && Number.isFinite(item.order) ? item.order : idx,
         source: (item.source === 'voice' ? 'voice' : 'text') as 'voice' | 'text',
         linkedTodoId: typeof item.linkedTodoId === 'string' ? item.linkedTodoId : undefined,
+        ...(reminderDate ? { reminderDate } : {}),
+        ...(reminderTime ? { reminderTime } : {}),
         createdAt: typeof item.createdAt === 'string' ? item.createdAt : nowIso,
         updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso,
       };

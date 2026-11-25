@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
+import {
+  createTranscribeTraceId,
+  logTranscribeEvent,
+  probeMicPermissionState,
+  type MicPermissionState,
+  type MicRecordingDiagnostics,
+} from '../utils/transcribeDebugLog';
 
 export interface RecordedAudioResult {
   blob: Blob;
@@ -8,6 +15,7 @@ export interface RecordedAudioResult {
   durationSeconds: number;
   sizeBytes: number;
   recordedAt: string;
+  diagnostics?: MicRecordingDiagnostics;
 }
 
 function isAppleSafari(): boolean {
@@ -153,6 +161,11 @@ export function useVoiceRecorder() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const startedAtRef = useRef<number>(0);
   const keepAliveReleaseRef = useRef<(() => void) | null>(null);
+  const traceIdRef = useRef<string>('');
+  const micPermAtStartRef = useRef<MicPermissionState>('unsupported');
+  const trackMutedRef = useRef<boolean>(false);
+  const trackEndedUnexpectedlyRef = useRef<boolean>(false);
+  const visibilityChangedRef = useRef<boolean>(false);
 
   const cleanup = useCallback(() => {
     if (keepAliveReleaseRef.current) {
@@ -181,12 +194,35 @@ export function useVoiceRecorder() {
       audioCtxRef.current = null;
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((track) => {
+        track.onended = null;
+        track.onmute = null;
+        track.onunmute = null;
+        track.stop();
+      });
       streamRef.current = null;
     }
     mediaRecorderRef.current = null;
     setLevels(Array(BAR_COUNT).fill(0.12));
   }, []);
+
+  useEffect(() => {
+    const handleVis = () => {
+      if (isRecording && traceIdRef.current) {
+        visibilityChangedRef.current = true;
+        logTranscribeEvent(
+          traceIdRef.current,
+          'recording_track_event',
+          { event: 'visibilitychange', visibilityState: document.visibilityState },
+          'info'
+        );
+      }
+    };
+    document.addEventListener('visibilitychange', handleVis);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVis);
+    };
+  }, [isRecording]);
 
   useEffect(() => {
     return () => {
@@ -198,11 +234,23 @@ export function useVoiceRecorder() {
     setError(null);
     pcmChunksRef.current = [];
     chunksRef.current = [];
+    const traceId = createTranscribeTraceId();
+    traceIdRef.current = traceId;
+    trackMutedRef.current = false;
+    trackEndedUnexpectedlyRef.current = false;
+    visibilityChangedRef.current = false;
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setError('Il microfono non è supportato in questo browser. Usa Safari su iOS o un browser moderno.');
       return false;
     }
+
+    const permBefore = await probeMicPermissionState();
+    micPermAtStartRef.current = permBefore;
+    logTranscribeEvent(traceId, 'mic_permission_check', {
+      phase: 'before_getUserMedia',
+      micPermission: permBefore,
+    });
 
     // Create & unlock AudioContext synchronously inside user gesture for iOS Safari reliability
     let preCtx: AudioContext | null = null;
@@ -236,6 +284,41 @@ export function useVoiceRecorder() {
       });
       streamRef.current = stream;
 
+      stream.getAudioTracks().forEach((track) => {
+        track.onended = () => {
+          trackEndedUnexpectedlyRef.current = true;
+          logTranscribeEvent(
+            traceId,
+            'recording_track_event',
+            { event: 'track_ended', readyState: track.readyState, label: track.label },
+            'warn'
+          );
+        };
+        track.onmute = () => {
+          trackMutedRef.current = true;
+          logTranscribeEvent(
+            traceId,
+            'recording_track_event',
+            { event: 'track_muted', muted: track.muted, readyState: track.readyState },
+            'warn'
+          );
+        };
+        track.onunmute = () => {
+          logTranscribeEvent(traceId, 'recording_track_event', {
+            event: 'track_unmuted',
+            readyState: track.readyState,
+          });
+        };
+      });
+
+      const permAfterGrant = await probeMicPermissionState();
+      micPermAtStartRef.current = permAfterGrant !== 'unsupported' ? permAfterGrant : permBefore;
+      logTranscribeEvent(traceId, 'recording_start', {
+        micPermissionAtStart: micPermAtStartRef.current,
+        audioTracksCount: stream.getAudioTracks().length,
+        firstTrackReadyState: stream.getAudioTracks()[0]?.readyState || 'none',
+      });
+
       // Start compressed MediaRecorder first (20 kbps Opus/AAC -> ~2.5 KB/s, >10x smaller than WAV!)
       let mediaRecorderActive = false;
       if (typeof MediaRecorder !== 'undefined') {
@@ -256,7 +339,11 @@ export function useVoiceRecorder() {
               chunksRef.current.push(event.data);
             }
           };
-          recorder.start();
+          try {
+            recorder.start(1000);
+          } catch {
+            recorder.start();
+          }
           mediaRecorderRef.current = recorder;
           mediaRecorderActive = true;
         } catch {
@@ -344,6 +431,9 @@ export function useVoiceRecorder() {
     const rawDuration = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
     const pcmChunks = [...pcmChunksRef.current];
     const sampleRate = sampleRateRef.current;
+    const traceId = traceIdRef.current || createTranscribeTraceId();
+    const trackStateBeforeStop =
+      streamRef.current?.getAudioTracks()[0]?.readyState || 'none';
 
     const recorder = mediaRecorderRef.current;
     let compressedBlob: Blob | null = null;
@@ -372,6 +462,24 @@ export function useVoiceRecorder() {
     cleanup();
     setIsRecording(false);
 
+    const micPermissionAtStop = await probeMicPermissionState();
+    const diagnostics: MicRecordingDiagnostics = {
+      traceId,
+      micPermissionAtStart: micPermAtStartRef.current,
+      micPermissionAtStop,
+      trackStateBeforeStop,
+      trackMutedDuringRecord: trackMutedRef.current,
+      trackEndedUnexpectedly: trackEndedUnexpectedlyRef.current,
+      visibilityChangedDuringRecord: visibilityChangedRef.current,
+    };
+
+    logTranscribeEvent(traceId, 'recording_stop', {
+      durationSeconds: rawDuration,
+      compressedSize: compressedBlob?.size || 0,
+      pcmChunksCount: pcmChunks.length,
+      ...diagnostics,
+    });
+
     // Prefer compressed Opus/AAC MediaRecorder audio (~20 kbps, ~10x smaller than WAV!)
     let finalBlob: Blob | null = null;
     let finalMime = compressedMime;
@@ -388,6 +496,12 @@ export function useVoiceRecorder() {
     }
 
     if (!finalBlob) {
+      logTranscribeEvent(
+        traceId,
+        'recording_stop',
+        { emptyCapture: true, ...diagnostics },
+        'warn'
+      );
       setError('Registrazione troppo breve o nessun audio catturato. Riprova a parlare nel microfono.');
       return null;
     }
@@ -401,6 +515,7 @@ export function useVoiceRecorder() {
         durationSeconds: rawDuration,
         sizeBytes: finalBlob.size,
         recordedAt,
+        diagnostics,
       };
     } catch (convErr) {
       setError(convErr instanceof Error ? convErr.message : 'Errore nella lettura audio.');

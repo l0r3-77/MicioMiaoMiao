@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { blobToBase64, useVoiceRecorder, type RecordedAudioResult } from '../hooks/useVoiceRecorder';
 import type { NoteColor, NoteEntry } from '../types/note';
-import { parseApiJsonSafe } from '../utils/apiError';
+import { fetchApiJsonWithRetry } from '../utils/apiError';
 import { deleteAudioClip, getAudioClip, saveAudioClip } from '../utils/audioStorage';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import { formatDuration, getCurrentTimeHHMM } from '../utils/dateUtils';
@@ -28,6 +28,7 @@ import {
 import { CHIBI_CAT_MASCOTS, getNekoForDate } from '../utils/nekoCatalog';
 import { publishQuotaSnapshot } from '../utils/quotaTracker';
 import { extractRemindersLocally, mergeReminders } from '../utils/reminderExtractor';
+import { fetchTranscribeWithDebug } from '../utils/transcribeDebugLog';
 import { CatIllustration } from './CatIllustration';
 import { QuotaStatusBar } from './QuotaStatusBar';
 
@@ -174,20 +175,7 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
     const releaseKeepAlive = startBackgroundSession('Analisi nota vocale in corso');
 
     try {
-      const response = await fetch('/api/notes/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          audioBase64: result.base64,
-          mimeType: result.mimeType,
-          durationSeconds: result.durationSeconds,
-          sizeBytes: result.sizeBytes,
-          recordedAt: result.recordedAt,
-        }),
-      });
-
-      const data = await parseApiJsonSafe<{
+      const { ok, data } = await fetchTranscribeWithDebug<{
         transcript?: string;
         bullets?: unknown;
         reminders?: unknown;
@@ -199,12 +187,24 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
           mimeType?: string;
           sizeBytes?: number;
         };
-      }>(response);
+      }>({
+        endpoint: '/api/notes/transcribe',
+        caller: 'VoiceRecorderPanel',
+        signal: controller.signal,
+        micDiagnostics: result.diagnostics,
+        payload: {
+          audioBase64: result.base64,
+          mimeType: result.mimeType,
+          durationSeconds: result.durationSeconds,
+          sizeBytes: result.sizeBytes,
+          recordedAt: result.recordedAt,
+        },
+      });
 
       if (data?.quota) {
         publishQuotaSnapshot(data.quota);
       }
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(data.error || 'Impossibile trascrivere la registrazione audio.');
       }
 
@@ -339,10 +339,24 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
         reader.readAsDataURL(file);
       });
 
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      const inferredFromExt =
+        ext === 'mp3'
+          ? 'audio/mp3'
+          : ext === 'wav'
+            ? 'audio/wav'
+            : ext === 'webm'
+              ? 'audio/webm'
+              : ext === 'ogg'
+                ? 'audio/ogg'
+                : ext === 'aac'
+                  ? 'audio/aac'
+                  : 'audio/mp4';
+
       await processAudioPayload({
         blob: file,
         base64,
-        mimeType: file.type || 'audio/mp4',
+        mimeType: file.type || inferredFromExt,
         durationSeconds: 1,
         sizeBytes: file.size,
         recordedAt: new Date().toISOString(),
@@ -362,7 +376,7 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
     }
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const timeoutId = window.setTimeout(() => controller.abort(), 35000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 45000);
 
     setIsProcessing(true);
     setApiError(null);
@@ -371,19 +385,20 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
     let bullets: string[] = [];
     let aiReminders: unknown;
     let suggestedRaw: unknown;
+    let synthesisNotice: string | null = null;
     try {
-      const response = await fetch('/api/notes/summarize-mood', {
+      const { response, data } = await fetchApiJsonWithRetry<{
+        bullets?: unknown;
+        reminders?: unknown;
+        suggestedColor?: unknown;
+        quota?: unknown;
+        error?: string;
+      }>('/api/notes/summarize-mood', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({ text: cleaned, isDailyOverview: false }),
       });
-      const data = await parseApiJsonSafe<{
-        bullets?: unknown;
-        reminders?: unknown;
-        suggestedColor?: unknown;
-        quota?: unknown;
-      }>(response);
       if (data?.quota) {
         publishQuotaSnapshot(data.quota);
       }
@@ -393,9 +408,14 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
         }
         aiReminders = data.reminders;
         suggestedRaw = data.suggestedColor;
+      } else {
+        synthesisNotice = `Appunto salvato, ma sintesi AI non riuscita (${
+          data.error || 'servizio AI momentaneamente non disponibile'
+        }). Puoi rigenerarla toccando la nota.`;
       }
     } catch {
-      // Save note anyway even if offline / summary skipped
+      synthesisNotice =
+        'Appunto salvato senza sintesi AI (timeout o connessione assente). Puoi rigenerare la sintesi aprendo la nota.';
     } finally {
       window.clearTimeout(timeoutId);
       releaseKeepAlive();
@@ -428,6 +448,9 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
     onEntryCreated(effectiveDate, newEntry);
     setManualText('');
     setTargetTime(getCurrentTimeHHMM());
+    if (synthesisNotice) {
+      setApiError(synthesisNotice);
+    }
   };
 
   const activeError = micError || apiError;

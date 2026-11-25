@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { blobToBase64 } from '../hooks/useVoiceRecorder';
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
-import { parseApiJsonSafe } from '../utils/apiError';
+import { fetchApiJsonWithRetry } from '../utils/apiError';
 import { getAudioClip } from '../utils/audioStorage';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import { formatBytes, formatDuration, formatRecordedDateTime } from '../utils/dateUtils';
@@ -28,6 +28,7 @@ import {
 import { getNekoForDate } from '../utils/nekoCatalog';
 import { publishQuotaSnapshot } from '../utils/quotaTracker';
 import { extractRemindersLocally, mergeReminders } from '../utils/reminderExtractor';
+import { fetchTranscribeWithDebug } from '../utils/transcribeDebugLog';
 import { CatIllustration } from './CatIllustration';
 
 interface NoteEditorModalProps {
@@ -112,17 +113,16 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     setAiError(null);
     const releaseKeepAlive = startBackgroundSession('Analisi sensazioni in corso');
     try {
-      const res = await fetch('/api/notes/summarize-mood', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: safeTranscript, isDailyOverview: false }),
-      });
-      const data = await parseApiJsonSafe<{
+      const { response: res, data } = await fetchApiJsonWithRetry<{
         bullets?: unknown;
         reminders?: unknown;
         suggestedColor?: unknown;
         quota?: unknown;
-      }>(res);
+      }>('/api/notes/summarize-mood', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: safeTranscript, isDailyOverview: false }),
+      });
       if (data?.quota) {
         publishQuotaSnapshot(data.quota);
       }
@@ -158,31 +158,33 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     if (!audioBlob) return;
     setIsTranscribing(true);
     setAiError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 120000);
     const releaseKeepAlive = startBackgroundSession('Trascrizione audio in corso');
     try {
       const base64 = await blobToBase64(audioBlob);
-      const res = await fetch('/api/notes/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioBase64: base64,
-          mimeType: entry.audioMetadata?.mimeType || audioBlob.type || 'audio/wav',
-          durationSeconds: entry.audioMetadata?.durationSeconds || 1,
-          sizeBytes: audioBlob.size,
-          recordedAt: entry.audioMetadata?.recordedAt || entry.createdAt,
-        }),
-      });
-      const data = await parseApiJsonSafe<{
+      const { ok, data } = await fetchTranscribeWithDebug<{
         transcript?: string;
         bullets?: unknown;
         reminders?: unknown;
         suggestedColor?: unknown;
         quota?: unknown;
-      }>(res);
+      }>({
+        endpoint: '/api/notes/transcribe',
+        caller: 'NoteEditorModal',
+        signal: controller.signal,
+        payload: {
+          audioBase64: base64,
+          mimeType: entry.audioMetadata?.mimeType || audioBlob.type || 'audio/wav',
+          durationSeconds: entry.audioMetadata?.durationSeconds || 1,
+          sizeBytes: audioBlob.size,
+          recordedAt: entry.audioMetadata?.recordedAt || entry.createdAt,
+        },
+      });
       if (data?.quota) {
         publishQuotaSnapshot(data.quota);
       }
-      if (!res.ok) {
+      if (!ok) {
         throw new Error(data.error || 'Impossibile trascrivere questo audio.');
       }
       const nextTranscript =
@@ -209,8 +211,13 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
         setColor(inferNoteColorFromText(nextTranscript, nextBullets));
       }
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Errore nella trascrizione.');
+      if ((err as { name?: string })?.name === 'AbortError') {
+        setAiError('Tempo di attesa scaduto per la trascrizione. Riprova tra qualche secondo.');
+      } else {
+        setAiError(err instanceof Error ? err.message : 'Errore nella trascrizione.');
+      }
     } finally {
+      window.clearTimeout(timeoutId);
       releaseKeepAlive();
       setIsTranscribing(false);
     }

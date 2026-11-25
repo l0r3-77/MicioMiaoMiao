@@ -16,6 +16,135 @@ const QUOTA_STATE_FILES = [
 ];
 const DEFAULT_FREE_TIER_LIMIT = 20;
 
+interface ServerTranscribeLogEntry {
+  id: string;
+  timestamp: string;
+  source: 'server' | 'client';
+  traceId: string;
+  stage: string;
+  level: 'info' | 'warn' | 'error';
+  details: Record<string, unknown>;
+}
+
+const MAX_SERVER_TRANSCRIBE_LOGS = 100;
+const serverTranscribeLogs: ServerTranscribeLogEntry[] = [];
+
+function appendServerTranscribeLog(
+  entry: Omit<ServerTranscribeLogEntry, 'id' | 'timestamp'>
+): ServerTranscribeLogEntry {
+  const full: ServerTranscribeLogEntry = {
+    id: `srv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+    ...entry,
+  };
+  serverTranscribeLogs.push(full);
+  if (serverTranscribeLogs.length > MAX_SERVER_TRANSCRIBE_LOGS) {
+    serverTranscribeLogs.splice(0, serverTranscribeLogs.length - MAX_SERVER_TRANSCRIBE_LOGS);
+  }
+  const tag = `[TranscribeDebug][${full.source}][${full.traceId}][${full.stage}]`;
+  if (full.level === 'error') {
+    console.error(tag, JSON.stringify(full.details));
+  } else if (full.level === 'warn') {
+    console.warn(tag, JSON.stringify(full.details));
+  } else {
+    console.info(tag, JSON.stringify(full.details));
+  }
+  return full;
+}
+
+function extractCookieKeyNames(cookieHeader: string | undefined): string[] {
+  if (!cookieHeader || typeof cookieHeader !== 'string') return [];
+  return cookieHeader
+    .split(';')
+    .map((part) => part.split('=')[0]?.trim() || '')
+    .filter(Boolean)
+    .slice(0, 25);
+}
+
+function sanitizeUrlPathOnly(rawUrl: string | undefined): string | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  try {
+    const u = new URL(rawUrl);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return rawUrl.split('?')[0]?.slice(0, 140) || null;
+  }
+}
+
+function buildSanitizedReqMeta(req: express.Request) {
+  const cookieHeader = req.headers.cookie;
+  const authHeader = req.headers.authorization;
+  const iapHeader = req.headers['x-goog-iap-jwt-assertion'];
+  const cookieKeyNames = extractCookieKeyNames(cookieHeader);
+
+  return {
+    method: req.method,
+    originalUrl: req.originalUrl,
+    host: req.headers.host || null,
+    forwardedHost: req.headers['x-forwarded-host'] || null,
+    forwardedProto: req.headers['x-forwarded-proto'] || null,
+    origin: req.headers.origin || null,
+    referer: sanitizeUrlPathOnly(
+      typeof req.headers.referer === 'string' ? req.headers.referer : undefined
+    ),
+    hasCookieHeader: Boolean(cookieHeader && cookieHeader.trim().length > 0),
+    cookieKeyNames,
+    hasAuthorizationHeader: Boolean(authHeader && authHeader.trim().length > 0),
+    hasIapJwt: Boolean(iapHeader),
+    clientCookiePresentHeader: req.headers['x-session-cookie-present'] || null,
+    clientMicPermissionHeader: req.headers['x-mic-permission'] || null,
+    clientCaller: req.headers['x-transcribe-caller'] || null,
+    hasGeminiApiKey: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim().length > 0),
+  };
+}
+
+function detectSessionSeenLabel(meta: ReturnType<typeof buildSanitizedReqMeta>): string {
+  const parts: string[] = [];
+  if (meta.hasCookieHeader) parts.push('cookie');
+  if (meta.hasAuthorizationHeader) parts.push('auth');
+  if (meta.hasIapJwt) parts.push('iap');
+  return parts.length > 0 ? parts.join('+') : 'none';
+}
+
+function resolveTraceId(req: express.Request): string {
+  const fromHeader = req.headers['x-transcribe-trace-id'];
+  if (typeof fromHeader === 'string' && fromHeader.trim()) {
+    return fromHeader.trim().slice(0, 80);
+  }
+  const bodyObj = req.body as { debugContext?: { traceId?: unknown } } | undefined;
+  if (typeof bodyObj?.debugContext?.traceId === 'string' && bodyObj.debugContext.traceId.trim()) {
+    return bodyObj.debugContext.traceId.trim().slice(0, 80);
+  }
+  return `srv_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function redactSensitiveObject(input: unknown, depth = 0): unknown {
+  if (depth > 4 || input == null) return input;
+  if (typeof input === 'string') return input.slice(0, 500);
+  if (typeof input !== 'object') return input;
+  if (Array.isArray(input)) {
+    return input.slice(0, 30).map((item) => redactSensitiveObject(item, depth + 1));
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    const lower = k.toLowerCase();
+    if (
+      lower === 'cookie' ||
+      lower === 'cookies' ||
+      lower === 'authorization' ||
+      lower === 'token' ||
+      lower === 'apikey' ||
+      lower === 'gemini_api_key' ||
+      lower === 'audiobase64'
+    ) {
+      out[k] = '[REDACTED]';
+    } else {
+      out[k] = redactSensitiveObject(v, depth + 1);
+    }
+  }
+  return out;
+}
+
 const CAT_EMOTICON_IDS = [
   'cat_note',
   'cat_fuel',
@@ -294,10 +423,42 @@ function markGlobalDailyQuotaExhausted(err: unknown) {
   persistQuotaState();
 }
 
+const unsupportedModels = new Set<string>();
+const modelTransientUnavailableUntil: Record<string, number> = {};
+
+function markModelTransientUnavailable(model: string, ttlMs = 120_000) {
+  modelTransientUnavailableUntil[model] = Date.now() + ttlMs;
+}
+
+function isModelTemporarilyUnavailable(model: string): boolean {
+  const until = modelTransientUnavailableUntil[model];
+  return typeof until === 'number' && Date.now() < until;
+}
+
+function isTransientServiceError(err: unknown): boolean {
+  const errObj = err as { status?: number; message?: string };
+  const msg = errObj?.message || '';
+  return (
+    errObj?.status === 503 ||
+    errObj?.status === 504 ||
+    errObj?.status === 502 ||
+    msg.includes('503') ||
+    msg.includes('UNAVAILABLE') ||
+    msg === 'GEMINI_TIMEOUT'
+  );
+}
+
 function isModelKnownExhausted(model: string): boolean {
+  if (unsupportedModels.has(model)) return true;
   ensureCurrentQuotaWindow();
   const until = quotaState.modelExhaustedUntil[model];
   return typeof until === 'number' && Date.now() < until;
+}
+
+function isModelNotFoundError(err: unknown): boolean {
+  const errObj = err as { status?: number; message?: string };
+  const msg = (errObj?.message || '').toLowerCase();
+  return errObj?.status === 404 || msg.includes('not_found') || msg.includes('not found');
 }
 
 function syncClientQuotaState(raw: unknown) {
@@ -464,12 +625,49 @@ function getGeminiClient(): GoogleGenAI {
   });
 }
 
+function getGeminiV1BetaClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    throw new Error('MISSING_API_KEY');
+  }
+  return new GoogleGenAI({
+    apiKey,
+    apiVersion: 'v1beta',
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+interface ModelAttemptConfig {
+  model: string;
+  thinkingLevel: ThinkingLevel | null;
+  timeoutMs: number;
+  backoffMs: number;
+}
+
+function getHealthyModelAttempts(timeoutMs = 55000): ModelAttemptConfig[] {
+  const allCandidates: ModelAttemptConfig[] = [
+    { model: 'gemini-3.5-flash-lite', thinkingLevel: null, timeoutMs, backoffMs: 500 },
+    { model: 'gemini-3.5-flash', thinkingLevel: null, timeoutMs, backoffMs: 500 },
+    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW, timeoutMs, backoffMs: 600 },
+    { model: 'gemini-3.6-flash', thinkingLevel: null, timeoutMs, backoffMs: 500 },
+    { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL, timeoutMs, backoffMs: 0 },
+  ];
+
+  const nonExhausted = allCandidates.filter((cfg) => !isModelKnownExhausted(cfg.model));
+  const nonCooled = nonExhausted.filter((cfg) => !isModelTemporarilyUnavailable(cfg.model));
+  return nonCooled.length > 0 ? nonCooled : nonExhausted;
+}
+
 function normalizeAudioMimeType(mimeType: string | undefined): string {
   if (!mimeType || typeof mimeType !== 'string') {
     return 'audio/mp4';
   }
   const base = mimeType.split(';')[0].trim().toLowerCase();
-  if (base === 'audio/x-m4a' || base === 'video/mp4') {
+  if (base === 'audio/x-m4a' || base === 'video/mp4' || base === 'audio/m4a') {
     return 'audio/mp4';
   }
   if (base === 'audio/wave' || base === 'audio/x-wav') {
@@ -478,7 +676,53 @@ function normalizeAudioMimeType(mimeType: string | undefined): string {
   if (base === 'video/webm') {
     return 'audio/webm';
   }
+  if (base === 'audio/x-mp3' || base === 'audio/mpeg3') {
+    return 'audio/mp3';
+  }
   return base || 'audio/mp4';
+}
+
+function parseGeminiJson<T>(raw: string): T | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const cleaned = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1)) as T;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function inferServerCatIconFallback(text: string): string {
+  const lower = (text || '').toLowerCase();
+  if (/benzina|gpl|diesel|gasolio|rifornimento|carburante/.test(lower)) return 'cat_fuel';
+  if (/barber|barbiere|parrucchiere|capelli|barba/.test(lower)) return 'cat_barber';
+  if (/doccia|bagno|lavar|shampoo/.test(lower)) return 'cat_shower';
+  if (/puliz|pulire|spazz|aspirapolvere|bucato|lavatric|stirare/.test(lower)) return 'cat_clean';
+  if (/auto|macchina|gomme|meccanico|tagliando|revisione/.test(lower)) return 'cat_car';
+  if (/bollett|pagament|banca|bonifico|fattura|affitto|tasse/.test(lower)) return 'cat_bills';
+  if (/cane|gatto|micio|veterinar|croccant/.test(lower)) return 'cat_pet';
+  if (/dottor|medic|farmacia|visita|dentist|analisi|salute/.test(lower)) return 'cat_health';
+  if (/spesa|supermercato|comprar|acquist|negozio|pane|latte/.test(lower)) return 'cat_shop';
+  if (/caff[eè]|colazion|bar\b/.test(lower)) return 'cat_coffee';
+  if (/pranz|cena|cucin|mangi|pizza/.test(lower)) return 'cat_food';
+  if (/chiamar|telefon|messagg|whatsapp|rispondere/.test(lower)) return 'cat_call';
+  if (/lavor|ufficio|riunion|mail|email|progetto|call\b/.test(lower)) return 'cat_work';
+  if (/sport|palestra|corsa|correr|allenament|piscina|bici/.test(lower)) return 'cat_sport';
+  if (/urgent|subito|emergenz|immediat/.test(lower)) return 'cat_fire';
+  return 'cat_note';
 }
 
 async function callWithTimeout<T>(fn: () => Promise<T>, timeoutMs: number): Promise<T> {
@@ -545,7 +789,8 @@ const REMINDERS_GUIDE_PROMPT = `4. "reminders": cerca nel testo eventuali cose i
 async function transcribeAndSynthesizeWithFailover(
   ai: GoogleGenAI,
   audioBase64: string,
-  mimeType: string
+  mimeType: string,
+  traceId?: string
 ): Promise<TranscribeSynthesisResult> {
   const audioBuffer = Buffer.from(audioBase64, 'base64');
   let uploadedFile: { uri?: string; mimeType?: string; name?: string } | null = null;
@@ -585,27 +830,8 @@ async function transcribeAndSynthesizeWithFailover(
           },
         };
 
-  const attempts: Array<{
-    model: string;
-    thinkingLevel: ThinkingLevel;
-    timeoutMs: number;
-    backoffMs: number;
-  }> = [
-    {
-      model: 'gemini-3.1-flash-lite',
-      thinkingLevel: ThinkingLevel.MINIMAL,
-      timeoutMs: 90000,
-      backoffMs: 1200,
-    },
-    {
-      model: 'gemini-4-hydrogen',
-      thinkingLevel: ThinkingLevel.LOW,
-      timeoutMs: 90000,
-      backoffMs: 0,
-    },
-  ];
-
-  const activeAttempts = attempts.filter((cfg) => !isModelKnownExhausted(cfg.model));
+  const perAttemptTimeoutMs = audioBuffer.length > 500_000 ? 45000 : 28000;
+  const activeAttempts = getHealthyModelAttempts(perAttemptTimeoutMs);
   if (activeAttempts.length === 0) {
     const err = new Error('RESOURCE_EXHAUSTED: FreeTier daily quota exhausted until reset') as Error & {
       status?: number;
@@ -632,7 +858,7 @@ async function transcribeAndSynthesizeWithFailover(
                     audioPart,
                     {
                       text: `Ascolta con attenzione questa nota vocale personale in italiano (anche se dura diversi minuti o l'audio è colloquiale) e restituisci un JSON valido con quattro campi:
-1. "transcript": trascrivi fedelmente in italiano chiaro e scorrevole TUTTO ciò che la persona ha detto dall'inizio alla fine della registrazione, senza omettere o troncare la parte finale. Rispondi "[SILENZIO]" SOLO se non si sente proprio alcuna parola o voce umana.
+1. "transcript": trascrivi fedelmente in italiano chiaro e scorrevole TUTTO ciò che la persona ha detto dall'inizio alla fine della registrazione, senza omettere o troncare la parte finale. IMPORTANTE: se nell'audio c'è solo silenzio, fruscio o rumore di fondo senza parole umane chiare, restituisci esattamente "[SILENZIO]" senza MAI inventare frasi.
 2. "bullets": individua SUBITO da questo stesso audio da 2 a 4 punti brevi sulle sensazioni, stato d'animo, stress, energia, focus o bisogni della persona (esempi: "Umore: sereno", "Stress: medio-alto", "Energia: stanca", "Focus: esaurito", "Sensazione: sollievo", "Bisogno: fare una pausa"). Deduci le sensazioni sia dalle parole sia dal tono. Niente trattini o pallini iniziali. Se transcript è "[SILENZIO]", restituisci [].
 ${COLOR_GUIDE_PROMPT}
 ${REMINDERS_GUIDE_PROMPT}`,
@@ -641,7 +867,7 @@ ${REMINDERS_GUIDE_PROMPT}`,
                 },
               ],
               config: {
-                thinkingConfig: { thinkingLevel: cfg.thinkingLevel },
+                ...(cfg.thinkingLevel ? { thinkingConfig: { thinkingLevel: cfg.thinkingLevel } } : {}),
                 responseMimeType: 'application/json',
                 responseSchema: {
                   type: Type.OBJECT,
@@ -679,13 +905,14 @@ ${REMINDERS_GUIDE_PROMPT}`,
         let rawReminders: unknown;
         let rawSuggestedColor: unknown;
 
-        try {
-          const parsed = JSON.parse(rawText) as {
-            transcript?: unknown;
-            bullets?: unknown;
-            reminders?: unknown;
-            suggestedColor?: unknown;
-          };
+        const parsed = parseGeminiJson<{
+          transcript?: unknown;
+          bullets?: unknown;
+          reminders?: unknown;
+          suggestedColor?: unknown;
+        }>(rawText);
+
+        if (parsed) {
           transcript = typeof parsed.transcript === 'string' ? parsed.transcript.trim() : '';
           bullets = Array.isArray(parsed.bullets)
             ? parsed.bullets
@@ -694,7 +921,7 @@ ${REMINDERS_GUIDE_PROMPT}`,
             : [];
           rawReminders = parsed.reminders;
           rawSuggestedColor = parsed.suggestedColor;
-        } catch {
+        } else {
           transcript = rawText.replace(/^["']|["']$/g, '').trim();
         }
 
@@ -727,14 +954,35 @@ ${REMINDERS_GUIDE_PROMPT}`,
       } catch (err) {
         lastError = err;
         const msg = (err as Error)?.message || String(err);
+        const notFound = isModelNotFoundError(err);
         console.warn(
           `[Transcribe attempt ${i + 1} (${cfg.model}) failed in ${Date.now() - t0}ms]`,
           msg.slice(0, 220)
         );
+        if (traceId || notFound) {
+          appendServerTranscribeLog({
+            source: 'server',
+            traceId: traceId || 'no-trace',
+            stage: notFound ? 'gemini_model_not_found' : 'gemini_attempt_failed',
+            level: notFound ? 'error' : 'warn',
+            details: {
+              attempt: i + 1,
+              model: cfg.model,
+              durationMs: Date.now() - t0,
+              status: (err as { status?: number })?.status || null,
+              isNotFound: notFound,
+              messagePreview: msg.slice(0, 220),
+            },
+          });
+        }
         if ((err as { status?: number })?.status === 429 || msg.includes('RESOURCE_EXHAUSTED')) {
           markModelQuotaExhausted(cfg.model, err);
+        } else if (isTransientServiceError(err)) {
+          markModelTransientUnavailable(cfg.model);
+        } else if (notFound) {
+          unsupportedModels.add(cfg.model);
         }
-        if (!isFailoverEligibleError(err) || i === activeAttempts.length - 1) {
+        if (!isFailoverEligibleError(err)) {
           throw err;
         }
         if (cfg.backoffMs > 0) {
@@ -746,20 +994,21 @@ ${REMINDERS_GUIDE_PROMPT}`,
     if (!isModelKnownExhausted('gemini-3.5-transcribe')) {
       const t0 = Date.now();
       try {
+        const aiBeta = getGeminiV1BetaClient();
         const transcribeResp = await callWithTimeout(
           () =>
-            ai.models.generateContent({
+            aiBeta.models.generateContent({
               model: 'gemini-3.5-transcribe',
               contents: {
                 parts: [
                   audioPart,
                   {
-                    text: 'Transcribe this audio faithfully in Italian. Reply "[SILENZIO]" only if there is no spoken voice at all.',
+                    text: 'Transcribe this audio faithfully in Italian. Reply "[SILENZIO]" if there is only silence or background noise with no clear spoken words.',
                   },
                 ],
               },
             }),
-          90000
+          35000
         );
         const transcript = (transcribeResp.text ?? '').trim();
         let bullets: string[] = [];
@@ -767,7 +1016,7 @@ ${REMINDERS_GUIDE_PROMPT}`,
         let suggestedColor: SuggestedColor = inferSuggestedColor(transcript);
         if (transcript && transcript !== '[SILENZIO]') {
           try {
-            const synth = await synthesizeMoodBullets(ai, transcript, false);
+            const synth = await synthesizeMoodBullets(ai, transcript, false, traceId);
             bullets = synth.bullets;
             reminders = synth.reminders;
             suggestedColor = synth.suggestedColor;
@@ -775,11 +1024,29 @@ ${REMINDERS_GUIDE_PROMPT}`,
             reminders = extractRemindersFallback(transcript);
           }
         }
-        console.log(`[Transcribe gemini-3.5-transcribe] ok in ${Date.now() - t0}ms`);
+        console.log(`[Transcribe gemini-3.5-transcribe v1beta] ok in ${Date.now() - t0}ms`);
         recordSuccessfulGeminiUsage();
         return { transcript, bullets, reminders, suggestedColor };
       } catch (transcribeErr) {
-        lastError = transcribeErr;
+        if (isModelNotFoundError(transcribeErr)) {
+          unsupportedModels.add('gemini-3.5-transcribe');
+          appendServerTranscribeLog({
+            source: 'server',
+            traceId: traceId || 'no-trace',
+            stage: 'gemini_model_not_found',
+            level: 'warn',
+            details: {
+              model: 'gemini-3.5-transcribe',
+              durationMs: Date.now() - t0,
+              cachedSkip: true,
+              messagePreview: ((transcribeErr as Error)?.message || String(transcribeErr)).slice(0, 200),
+            },
+          });
+          console.warn('[Transcribe] gemini-3.5-transcribe unsupported; cached skip');
+          if (!lastError) lastError = transcribeErr;
+        } else {
+          lastError = transcribeErr;
+        }
       }
     }
   } finally {
@@ -794,19 +1061,10 @@ ${REMINDERS_GUIDE_PROMPT}`,
 async function synthesizeMoodBullets(
   ai: GoogleGenAI,
   text: string,
-  isDailyOverview = false
+  isDailyOverview = false,
+  traceId?: string
 ): Promise<{ bullets: string[]; reminders: string[]; suggestedColor: SuggestedColor }> {
-  const attempts: Array<{
-    model: string;
-    thinkingLevel: ThinkingLevel;
-    timeoutMs: number;
-    backoffMs: number;
-  }> = [
-    { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL, timeoutMs: 28000, backoffMs: 800 },
-    { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW, timeoutMs: 25000, backoffMs: 0 },
-  ];
-
-  const activeAttempts = attempts.filter((cfg) => !isModelKnownExhausted(cfg.model));
+  const activeAttempts = getHealthyModelAttempts(15000);
   if (activeAttempts.length === 0) {
     const err = new Error('RESOURCE_EXHAUSTED: FreeTier daily quota exhausted until reset') as Error & {
       status?: number;
@@ -844,7 +1102,7 @@ ${text}
             model: cfg.model,
             contents: prompt,
             config: {
-              thinkingConfig: { thinkingLevel: cfg.thinkingLevel },
+              ...(cfg.thinkingLevel ? { thinkingConfig: { thinkingLevel: cfg.thinkingLevel } } : {}),
               systemInstruction:
                 'Sei un assistente discreto per il diario personale di stati d’animo, stress e sensazioni. Rispondi esclusivamente in JSON valido secondo lo schema.',
               responseMimeType: 'application/json',
@@ -883,11 +1141,12 @@ ${text}
       );
 
       const rawJson = (response.text ?? '{}').trim();
-      const parsed = JSON.parse(rawJson) as {
-        bullets?: unknown;
-        reminders?: unknown;
-        suggestedColor?: unknown;
-      };
+      const parsed =
+        parseGeminiJson<{
+          bullets?: unknown;
+          reminders?: unknown;
+          suggestedColor?: unknown;
+        }>(rawJson) || {};
       const bullets = Array.isArray(parsed.bullets)
         ? parsed.bullets
             .map((item) => String(item ?? '').replace(/^[•\-*\s]+/, '').trim())
@@ -902,12 +1161,32 @@ ${text}
       return { bullets, reminders, suggestedColor };
     } catch (err) {
       const msg = (err as Error)?.message || String(err);
+      const notFound = isModelNotFoundError(err);
       console.warn(
         `[MoodBullets attempt ${i + 1} (${cfg.model}) failed in ${Date.now() - t0}ms]`,
         msg.slice(0, 220)
       );
+      if (traceId || notFound) {
+        appendServerTranscribeLog({
+          source: 'server',
+          traceId: traceId || 'no-trace',
+          stage: notFound ? 'mood_gemini_model_not_found' : 'mood_gemini_attempt_failed',
+          level: notFound ? 'error' : 'warn',
+          details: {
+            attempt: i + 1,
+            model: cfg.model,
+            durationMs: Date.now() - t0,
+            status: (err as { status?: number })?.status || null,
+            messagePreview: msg.slice(0, 200),
+          },
+        });
+      }
       if ((err as { status?: number })?.status === 429 || msg.includes('RESOURCE_EXHAUSTED')) {
         markModelQuotaExhausted(cfg.model, err);
+      } else if (isTransientServiceError(err)) {
+        markModelTransientUnavailable(cfg.model);
+      } else if (notFound) {
+        unsupportedModels.add(cfg.model);
       }
       if (!isFailoverEligibleError(err) || i === activeAttempts.length - 1) {
         throw err;
@@ -928,7 +1207,8 @@ ${text}
 function handleGeminiError(
   error: unknown,
   res: express.Response,
-  mode: 'audio' | 'text' = 'audio'
+  mode: 'audio' | 'text' = 'audio',
+  traceId?: string
 ) {
   const errObj = error as { status?: number; message?: string };
   const message = errObj?.message || 'Errore imprevisto durante l’elaborazione.';
@@ -947,6 +1227,27 @@ function handleGeminiError(
       error: parsedQuota.isDailyFreeTier
         ? dailyMsg
         : 'Limite temporaneo di richieste API raggiunto. Attendi qualche secondo e riprova.',
+      traceId,
+      quota: getPublicQuotaSnapshot(),
+    });
+  }
+
+  if (isModelNotFoundError(error)) {
+    appendServerTranscribeLog({
+      source: 'server',
+      traceId: traceId || 'no-trace',
+      stage: 'gemini_not_found_response',
+      level: 'error',
+      details: {
+        mode,
+        status: errObj?.status || 404,
+        messagePreview: message.slice(0, 260),
+      },
+    });
+    return res.status(404).json({
+      error: `Modello AI non trovato (NOT_FOUND): ${message.slice(0, 180)}`,
+      notFoundSource: 'gemini_model_not_found',
+      traceId,
       quota: getPublicQuotaSnapshot(),
     });
   }
@@ -956,29 +1257,34 @@ function handleGeminiError(
   if (message === 'MISSING_API_KEY') {
     return res.status(500).json({
       error: 'Chiave GEMINI_API_KEY non configurata. Controlla il pannello Settings > Secrets.',
+      traceId,
       quota: getPublicQuotaSnapshot(),
     });
   }
   if (message === 'GEMINI_TIMEOUT') {
     return res.status(504).json({
       error: 'La richiesta sta impiegando troppo tempo. Riprova tra qualche secondo.',
+      traceId,
       quota: getPublicQuotaSnapshot(),
     });
   }
   if (message.includes('PERMISSION_DENIED') || message.includes('API_KEY_INVALID') || errObj?.status === 403) {
     return res.status(403).json({
       error: 'Chiave API non valida o permessi insufficienti. Verifica GEMINI_API_KEY in Settings > Secrets.',
+      traceId,
       quota: getPublicQuotaSnapshot(),
     });
   }
   if (message.includes('UNAVAILABLE') || errObj?.status === 503) {
     return res.status(503).json({
       error: 'Il servizio AI è temporaneamente sovraccarico. Riprova tra qualche secondo.',
+      traceId,
       quota: getPublicQuotaSnapshot(),
     });
   }
   return res.status(500).json({
     error: `Errore durante l’elaborazione: ${message}`,
+    traceId,
     quota: getPublicQuotaSnapshot(),
   });
 }
@@ -987,6 +1293,88 @@ async function startServer() {
   const app = express();
 
   app.use(express.json({ limit: '50mb' }));
+
+  app.use(
+    [
+      '/api/notes/transcribe',
+      '/api/notes/transcribe-todo',
+      '/api/notes/summarize-mood',
+      '/api/notes/parse-batch-todos',
+      '/api/health',
+    ],
+    (req, res, next) => {
+    const traceId = resolveTraceId(req);
+    const meta = buildSanitizedReqMeta(req);
+    const sessionSeen = detectSessionSeenLabel(meta);
+    res.locals.transcribeTraceId = traceId;
+    res.setHeader('X-Server-Trace-Id', traceId);
+    res.setHeader('X-Server-Session-Seen', sessionSeen);
+
+    if (req.method === 'POST') {
+      const bodyObj = (req.body || {}) as {
+        audioBase64?: unknown;
+        mimeType?: unknown;
+        debugContext?: unknown;
+      };
+      appendServerTranscribeLog({
+        source: 'server',
+        traceId,
+        stage: 'server_req_received',
+        level: 'info',
+        details: {
+          ...meta,
+          sessionSeen,
+          audioBase64Length: typeof bodyObj.audioBase64 === 'string' ? bodyObj.audioBase64.length : 0,
+          mimeType: typeof bodyObj.mimeType === 'string' ? bodyObj.mimeType : null,
+          clientDebugContext: redactSensitiveObject(bodyObj.debugContext || null),
+        },
+      });
+    }
+    next();
+  });
+
+  app.get('/api/debug/transcribe-logs', (_req, res) => {
+    res.json({
+      count: serverTranscribeLogs.length,
+      logs: serverTranscribeLogs,
+    });
+  });
+
+  app.post('/api/debug/transcribe-logs', (req, res) => {
+    const body = (req.body || {}) as {
+      traceId?: unknown;
+      stage?: unknown;
+      level?: unknown;
+      details?: unknown;
+    };
+    const traceId =
+      typeof body.traceId === 'string' && body.traceId.trim()
+        ? body.traceId.trim().slice(0, 80)
+        : resolveTraceId(req);
+    const stage =
+      typeof body.stage === 'string' && body.stage.trim()
+        ? body.stage.trim().slice(0, 60)
+        : 'client_event';
+    const level: 'info' | 'warn' | 'error' =
+      body.level === 'error' || body.level === 'warn' || body.level === 'info'
+        ? body.level
+        : 'info';
+
+    appendServerTranscribeLog({
+      source: 'client',
+      traceId,
+      stage,
+      level,
+      details: (redactSensitiveObject(body.details || {}) as Record<string, unknown>) || {},
+    });
+
+    res.json({ ok: true, count: serverTranscribeLogs.length });
+  });
+
+  app.delete('/api/debug/transcribe-logs', (_req, res) => {
+    serverTranscribeLogs.length = 0;
+    res.json({ ok: true, cleared: true });
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
@@ -1004,6 +1392,7 @@ async function startServer() {
 
 
   app.post('/api/notes/transcribe', async (req, res) => {
+    const traceId = (res.locals.transcribeTraceId as string | undefined) || resolveTraceId(req);
     try {
       const {
         audioBase64,
@@ -1020,7 +1409,7 @@ async function startServer() {
       };
 
       if (!audioBase64 || typeof audioBase64 !== 'string') {
-        return res.status(400).json({ error: 'Nessun dato audio ricevuto dal microfono.' });
+        return res.status(400).json({ error: 'Nessun dato audio ricevuto dal microfono.', traceId });
       }
 
       const now = new Date();
@@ -1029,12 +1418,13 @@ async function startServer() {
 
       // Single combined Gemini call: faithful transcription + sensations bullets + reminders + color
       const { transcript, bullets, reminders, suggestedColor } =
-        await transcribeAndSynthesizeWithFailover(ai, audioBase64, cleanMime);
+        await transcribeAndSynthesizeWithFailover(ai, audioBase64, cleanMime, traceId);
 
       if (!transcript || transcript === '[SILENZIO]' || transcript.toLowerCase() === 'silenzio') {
         return res.status(422).json({
           error:
             'Non è stato rilevato alcun parlato nella registrazione. Riprova parlando più vicino al microfono.',
+          traceId,
           quota: getPublicQuotaSnapshot(),
         });
       }
@@ -1044,6 +1434,7 @@ async function startServer() {
         bullets,
         reminders,
         suggestedColor,
+        traceId,
         quota: getPublicQuotaSnapshot(),
         audioMetadata: {
           recordedAt: recordedAt || now.toISOString(),
@@ -1058,11 +1449,12 @@ async function startServer() {
         },
       });
     } catch (error) {
-      return handleGeminiError(error, res, 'audio');
+      return handleGeminiError(error, res, 'audio', traceId);
     }
   });
 
   app.post('/api/notes/summarize-mood', async (req, res) => {
+    const traceId = (res.locals.transcribeTraceId as string | undefined) || resolveTraceId(req);
     try {
       const { text, isDailyOverview } = req.body as {
         text?: string;
@@ -1070,42 +1462,42 @@ async function startServer() {
       };
 
       if (!text || typeof text !== 'string' || !text.trim()) {
-        return res.status(400).json({ error: 'Nessun testo da analizzare.' });
+        return res.status(400).json({ error: 'Nessun testo da analizzare.', traceId });
       }
 
       const ai = getGeminiClient();
       const { bullets, reminders, suggestedColor } = await synthesizeMoodBullets(
         ai,
         text.trim(),
-        Boolean(isDailyOverview)
+        Boolean(isDailyOverview),
+        traceId
       );
 
-      return res.json({ bullets, reminders, suggestedColor, quota: getPublicQuotaSnapshot() });
+      return res.json({ bullets, reminders, suggestedColor, traceId, quota: getPublicQuotaSnapshot() });
     } catch (error) {
-      return handleGeminiError(error, res, 'text');
+      return handleGeminiError(error, res, 'text', traceId);
     }
   });
 
   app.post('/api/notes/transcribe-todo', async (req, res) => {
+    const traceId = (res.locals.transcribeTraceId as string | undefined) || resolveTraceId(req);
     try {
       const { audioBase64, mimeType } = req.body as {
         audioBase64?: string;
         mimeType?: string;
       };
       if (!audioBase64 || typeof audioBase64 !== 'string') {
-        return res.status(400).json({ error: 'Nessun audio ricevuto.' });
+        return res.status(400).json({ error: 'Nessun audio ricevuto.', traceId });
       }
       const cleanMime = normalizeAudioMimeType(mimeType);
       const ai = getGeminiClient();
 
-      const todoAttempts: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
-        { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
-        { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
-      ].filter((a) => !isModelKnownExhausted(a.model));
+      const todoAttempts = getHealthyModelAttempts(20000);
 
-      if (todoAttempts.length === 0 && isModelKnownExhausted('gemini-3.5-transcribe')) {
+      if (todoAttempts.length === 0) {
         return res.status(429).json({
           error: 'Richieste AI di oggi esaurite: scrivi la nota manualmente.',
+          traceId,
           quota: getPublicQuotaSnapshot(),
         });
       }
@@ -1125,13 +1517,15 @@ async function startServer() {
                     parts: [
                       { inlineData: { mimeType: cleanMime, data: audioBase64 } },
                       {
-                        text: `Trascrivi fedelmente questa breve nota vocale da fare in italiano e scegli l'ID icona del gatto MicioMiao più inerente al significato del testo tra quelli consentiti (es. benzina/gpl/diesel/rifornimento -> "cat_fuel", barbiere/barber/capelli/barba -> "cat_barber", auto/gomme/meccanico -> "cat_car", doccia/bagno/lavarsi -> "cat_shower", pulizie/bucato/spazzare -> "cat_clean", bollette/pagamenti/banca -> "cat_bills", cane/gatto/veterinario -> "cat_pet", spesa/supermercato/comprare -> "cat_shop", dottore/farmacia/visita -> "cat_health", caffè/colazione -> "cat_coffee", pranzo/cena/cucinare -> "cat_food", chiamata/messaggio -> "cat_call", lavoro/ufficio/email -> "cat_work", sport/palestra -> "cat_sport", urgente -> "cat_fire"). Restituisci SOLO JSON con "text" e "emoji". Se non c'è parlato metti text="[SILENZIO]".`,
+                        text: `Trascrivi fedelmente questa breve nota vocale da fare in italiano e scegli l'ID icona del gatto MicioMiao più inerente al significato del testo tra quelli consentiti (es. benzina/gpl/diesel/rifornimento -> "cat_fuel", barbiere/barber/capelli/barba -> "cat_barber", auto/gomme/meccanico -> "cat_car", doccia/bagno/lavarsi -> "cat_shower", pulizie/bucato/spazzare -> "cat_clean", bollette/pagamenti/banca -> "cat_bills", cane/gatto/veterinario -> "cat_pet", spesa/supermercato/comprare -> "cat_shop", dottore/farmacia/visita -> "cat_health", caffè/colazione -> "cat_coffee", pranzo/cena/cucinare -> "cat_food", chiamata/messaggio -> "cat_call", lavoro/ufficio/email -> "cat_work", sport/palestra -> "cat_sport", urgente -> "cat_fire"). Restituisci SOLO JSON con "text" e "emoji". IMPORTANTE: se nell'audio c'è solo silenzio o rumore di fondo senza parole chiare, restituisci esattamente text="[SILENZIO]" senza inventare nulla.`,
                       },
                     ],
                   },
                 ],
                 config: {
-                  thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
+                  ...(attempt.thinkingLevel
+                    ? { thinkingConfig: { thinkingLevel: attempt.thinkingLevel } }
+                    : {}),
                   responseMimeType: 'application/json',
                   responseSchema: {
                     type: Type.OBJECT,
@@ -1143,17 +1537,19 @@ async function startServer() {
                   },
                 },
               }),
-            45000
+            attempt.timeoutMs
           );
 
-          const parsed = JSON.parse((response.text ?? '{}').trim()) as {
-            text?: string;
-            emoji?: string;
-          };
+          const parsed =
+            parseGeminiJson<{
+              text?: string;
+              emoji?: string;
+            }>(response.text ?? '{}') || {};
           const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
           if (!text || text === '[SILENZIO]') {
             return res.status(422).json({
               error: 'Nessuna parola rilevata nella registrazione.',
+              traceId,
               quota: getPublicQuotaSnapshot(),
             });
           }
@@ -1163,13 +1559,31 @@ async function startServer() {
             emoji:
               typeof parsed.emoji === 'string' && catEmoticonIds.includes(parsed.emoji.trim())
                 ? parsed.emoji.trim()
-                : 'cat_note',
+                : inferServerCatIconFallback(text),
+            traceId,
             quota: getPublicQuotaSnapshot(),
           });
         } catch (err) {
           lastErr = err;
+          const notFound = isModelNotFoundError(err);
+          appendServerTranscribeLog({
+            source: 'server',
+            traceId,
+            stage: notFound ? 'todo_gemini_model_not_found' : 'todo_gemini_attempt_failed',
+            level: notFound ? 'error' : 'warn',
+            details: {
+              model: attempt.model,
+              status: (err as { status?: number })?.status || null,
+              isNotFound: notFound,
+              messagePreview: ((err as Error)?.message || String(err)).slice(0, 200),
+            },
+          });
           if ((err as { status?: number })?.status === 429) {
             markModelQuotaExhausted(attempt.model, err);
+          } else if (isTransientServiceError(err)) {
+            markModelTransientUnavailable(attempt.model);
+          } else if (notFound) {
+            unsupportedModels.add(attempt.model);
           }
           if (!isFailoverEligibleError(err)) break;
         }
@@ -1177,9 +1591,10 @@ async function startServer() {
 
       if (!isModelKnownExhausted('gemini-3.5-transcribe')) {
         try {
+          const aiBeta = getGeminiV1BetaClient();
           const transcribeResp = await callWithTimeout(
             () =>
-              ai.models.generateContent({
+              aiBeta.models.generateContent({
                 model: 'gemini-3.5-transcribe',
                 contents: {
                   parts: [
@@ -1188,28 +1603,46 @@ async function startServer() {
                   ],
                 },
               }),
-            45000
+            25000
           );
           const text = (transcribeResp.text ?? '').trim();
           if (!text || text === '[SILENZIO]') {
             return res.status(422).json({
               error: 'Nessuna parola rilevata nella registrazione.',
+              traceId,
               quota: getPublicQuotaSnapshot(),
             });
           }
           recordSuccessfulGeminiUsage();
           return res.json({
             text,
-            emoji: 'cat_note',
+            emoji: inferServerCatIconFallback(text),
+            traceId,
             quota: getPublicQuotaSnapshot(),
           });
         } catch (transcribeErr) {
-          lastErr = transcribeErr;
+          if (isModelNotFoundError(transcribeErr)) {
+            unsupportedModels.add('gemini-3.5-transcribe');
+            appendServerTranscribeLog({
+              source: 'server',
+              traceId,
+              stage: 'todo_gemini_model_not_found',
+              level: 'warn',
+              details: {
+                model: 'gemini-3.5-transcribe',
+                cachedSkip: true,
+                messagePreview: ((transcribeErr as Error)?.message || String(transcribeErr)).slice(0, 200),
+              },
+            });
+            if (!lastErr) lastErr = transcribeErr;
+          } else {
+            lastErr = transcribeErr;
+          }
         }
       }
       throw lastErr;
     } catch (error) {
-      return handleGeminiError(error, res, 'audio');
+      return handleGeminiError(error, res, 'audio', traceId);
     }
   });
 
@@ -1232,99 +1665,138 @@ async function startServer() {
     }
 
     try {
-      const batchAttempts: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
-        { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
-        { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
-      ].filter((a) => !isModelKnownExhausted(a.model));
+      const batchAttempts = getHealthyModelAttempts(15000);
       if (batchAttempts.length === 0) {
         return res.json({
-          items: fallbackLines.map((text) => ({ text, emoji: '' })),
+          items: fallbackLines.map((text) => ({ text, emoji: inferServerCatIconFallback(text) })),
           usedFallback: true,
           quota: getPublicQuotaSnapshot(),
         });
       }
 
       const catEmoticonIds = CAT_EMOTICON_IDS;
-
       const numberedLines = fallbackLines.map((line, i) => `${i}: ${line}`).join('\n');
-
       const ai = getGeminiClient();
-      const chosen = batchAttempts[0];
-      const response = await callWithTimeout(
-        () =>
-          ai.models.generateContent({
-            model: chosen.model,
-            contents: `Associa a ciascuna delle ${fallbackLines.length} righe numerate l'ID icona del gatto MicioMiao più inerente al testo (es. benzina/gpl/rifornimento -> "cat_fuel", barber/barbiere/capelli -> "cat_barber", auto/revisione -> "cat_car", doccia -> "cat_shower", pulizie/bucato -> "cat_clean", bollette/pagamenti -> "cat_bills", cane/gatto -> "cat_pet", spesa/acquisti -> "cat_shop", dottore/salute -> "cat_health", caffè -> "cat_coffee", cibo/cena -> "cat_food", chiamare -> "cat_call", lavoro -> "cat_work", sport -> "cat_sport").
+
+      for (const chosen of batchAttempts) {
+        try {
+          const response = await callWithTimeout(
+            () =>
+              ai.models.generateContent({
+                model: chosen.model,
+                contents: `Associa a ciascuna delle ${fallbackLines.length} righe numerate l'ID icona del gatto MicioMiao più inerente al testo (es. benzina/gpl/rifornimento -> "cat_fuel", barber/barbiere/capelli -> "cat_barber", auto/revisione -> "cat_car", doccia -> "cat_shower", pulizie/bucato -> "cat_clean", bollette/pagamenti -> "cat_bills", cane/gatto -> "cat_pet", spesa/acquisti -> "cat_shop", dottore/salute -> "cat_health", caffè -> "cat_coffee", cibo/cena -> "cat_food", chiamare -> "cat_call", lavoro -> "cat_work", sport -> "cat_sport").
 REGOLA ASSOLUTA: ogni riga numerata DEVE restare UNA SOLA nota. Anche se su una stessa riga ci sono più attività (separate da virgole, "e", ";", "/" o trattini), NON dividerle MAI su più note: mantieni tutte le attività di quella riga in una riga sola. Restituisci esattamente un elemento per ogni indice da 0 a ${fallbackLines.length - 1}.
 
 Righe:
 """
 ${numberedLines.slice(0, 6000)}
 """`,
-            config: {
-              thinkingConfig: { thinkingLevel: chosen.thinkingLevel },
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  items: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        index: { type: Type.INTEGER },
-                        emoji: { type: Type.STRING, enum: catEmoticonIds },
+                config: {
+                  ...(chosen.thinkingLevel
+                    ? { thinkingConfig: { thinkingLevel: chosen.thinkingLevel } }
+                    : {}),
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      items: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            index: { type: Type.INTEGER },
+                            emoji: { type: Type.STRING, enum: catEmoticonIds },
+                          },
+                          required: ['index', 'emoji'],
+                        },
                       },
-                      required: ['index', 'emoji'],
                     },
+                    required: ['items'],
                   },
                 },
-                required: ['items'],
-              },
-            },
-          }),
-        25000
-      );
+              }),
+            chosen.timeoutMs
+          );
 
-      const parsed = JSON.parse((response.text ?? '{}').trim()) as {
-        items?: Array<{ index?: unknown; emoji?: unknown }>;
-      };
-      const emojiByIndex = new Map<number, string>();
-      if (Array.isArray(parsed.items)) {
-        for (const it of parsed.items) {
-          if (
-            typeof it?.index === 'number' &&
-            Number.isInteger(it.index) &&
-            typeof it?.emoji === 'string' &&
-            catEmoticonIds.includes(it.emoji.trim())
-          ) {
-            emojiByIndex.set(it.index, it.emoji.trim());
+          const parsed =
+            parseGeminiJson<{
+              items?: Array<{ index?: unknown; emoji?: unknown }>;
+            }>(response.text ?? '{}') || {};
+          const emojiByIndex = new Map<number, string>();
+          if (Array.isArray(parsed.items)) {
+            for (const it of parsed.items) {
+              if (
+                typeof it?.index === 'number' &&
+                Number.isInteger(it.index) &&
+                typeof it?.emoji === 'string' &&
+                catEmoticonIds.includes(it.emoji.trim())
+              ) {
+                emojiByIndex.set(it.index, it.emoji.trim());
+              }
+            }
           }
+
+          const items = fallbackLines.map((text, idx) => ({
+            text,
+            emoji: emojiByIndex.get(idx) || '',
+          }));
+
+          recordSuccessfulGeminiUsage();
+          return res.json({
+            items,
+            usedFallback: false,
+            quota: getPublicQuotaSnapshot(),
+          });
+        } catch (err) {
+          if ((err as { status?: number })?.status === 429) {
+            markModelQuotaExhausted(chosen.model, err);
+          } else if (isTransientServiceError(err)) {
+            markModelTransientUnavailable(chosen.model);
+          } else if (isModelNotFoundError(err)) {
+            unsupportedModels.add(chosen.model);
+          }
+          if (!isFailoverEligibleError(err)) break;
         }
       }
 
-      const items = fallbackLines.map((text, idx) => ({
-        text,
-        emoji: emojiByIndex.get(idx) || '',
-      }));
-
-      recordSuccessfulGeminiUsage();
       return res.json({
-        items,
-        usedFallback: false,
+        items: fallbackLines.map((text) => ({ text, emoji: inferServerCatIconFallback(text) })),
+        usedFallback: true,
         quota: getPublicQuotaSnapshot(),
       });
     } catch {
       return res.json({
-        items: fallbackLines.map((text) => ({ text, emoji: '' })),
+        items: fallbackLines.map((text) => ({ text, emoji: inferServerCatIconFallback(text) })),
         usedFallback: true,
         quota: getPublicQuotaSnapshot(),
       });
     }
   });
 
-  app.use('/api', (_req, res) => {
-    res.status(404).json({ error: 'Endpoint API non trovato sul server.' });
+  app.use('/api', (req, res) => {
+    const traceId = resolveTraceId(req);
+    const meta = buildSanitizedReqMeta(req);
+    const sessionSeen = detectSessionSeenLabel(meta);
+    res.setHeader('X-Server-Trace-Id', traceId);
+    res.setHeader('X-Server-Session-Seen', sessionSeen);
+
+    appendServerTranscribeLog({
+      source: 'server',
+      traceId,
+      stage: 'express_api_not_found',
+      level: 'warn',
+      details: {
+        ...meta,
+        sessionSeen,
+      },
+    });
+
+    res.status(404).json({
+      error: 'Endpoint API non trovato sul server (NOT_FOUND).',
+      notFoundSource: 'express_api_router',
+      path: req.originalUrl,
+      traceId,
+    });
   });
 
   if (process.env.NODE_ENV !== 'production') {

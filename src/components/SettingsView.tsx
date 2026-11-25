@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Activity,
   AlertCircle,
   Bell,
+  ChevronDown,
+  ChevronUp,
   Download,
   FileCheck2,
   HardDrive,
@@ -48,6 +51,7 @@ import {
 import { type DailyZoomLevel } from './NoteCard';
 import { PWAInstallButton } from './PWAInstallButton';
 import { QuotaStatusBar } from './QuotaStatusBar';
+import { SystemDiagnosticViewer } from './SystemDiagnosticViewer';
 
 interface SettingsViewProps {
   dailyNotes: DailyNote[];
@@ -93,6 +97,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [pendingModal, setPendingModal] = useState<PendingModal | null>(null);
   const [restoreInProgress, setRestoreInProgress] = useState(false);
   const [linkedFileName, setLinkedFileName] = useState<string | null>(null);
+  const [showSystemLogs, setShowSystemLogs] = useState(false);
 
   const neko = CHIBI_CAT_MASCOTS.zen;
   const totalEntriesCount = dailyNotes.reduce((acc, d) => acc + d.entries.length, 0);
@@ -692,6 +697,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         onResetSection={onResetLayout}
         className="space-y-4"
       />
+
+      {/* Hidden-by-default Real-Time System Log & Mic Diagnostic Viewer */}
+      <div className="pt-1 space-y-3">
+        <button
+          type="button"
+          aria-expanded={showSystemLogs}
+          onClick={() => setShowSystemLogs((prev) => !prev)}
+          className="w-full min-h-[40px] flex items-center justify-between gap-2 rounded-2xl border border-dashed border-[var(--app-border)] bg-[var(--app-card)]/70 px-4 py-2 text-xs font-semibold text-[var(--app-text-muted)] hover:text-[var(--app-text)] hover:border-[var(--app-accent-soft-border)] transition-colors"
+        >
+          <span className="inline-flex items-center gap-2">
+            <Activity className="h-3.5 w-3.5 text-[var(--app-accent-text)]" aria-hidden="true" />
+            <span>Diagnostica avanzata &amp; Log di sistema</span>
+          </span>
+          {showSystemLogs ? (
+            <ChevronUp className="h-4 w-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+        </button>
+
+        {showSystemLogs && <SystemDiagnosticViewer onNotify={onNotify} />}
+      </div>
 
       {/* Explicit Confirmation Modal before Backup Restore */}
       {pendingModal && (
