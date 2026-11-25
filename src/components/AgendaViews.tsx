@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Pin, Plus, ZoomIn, ZoomOut } from 'lucide-react';
 import type { AgendaViewMode, DailyNote, NoteColor, NoteEntry } from '../types/note';
 import {
@@ -96,7 +96,7 @@ const ZoomControlBar: React.FC<ZoomControlBarProps> = ({
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <span className="text-[11px] font-medium text-stone-500">Livello dettaglio</span>
+      <span className="text-[11px] font-medium text-[var(--app-text-muted)]">Livello dettaglio</span>
       <div className="flex items-center gap-1">
         <button
           type="button"
@@ -106,7 +106,7 @@ const ZoomControlBar: React.FC<ZoomControlBarProps> = ({
           title="Zoom indietro: riduci dettagli"
           className={`${
             compact ? 'min-h-[30px] min-w-[30px]' : 'min-h-[34px] min-w-[34px]'
-          } flex items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 hover:bg-stone-100 disabled:opacity-35 transition-colors`}
+          } flex items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-35 transition-colors`}
         >
           <ZoomOut className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
@@ -114,7 +114,7 @@ const ZoomControlBar: React.FC<ZoomControlBarProps> = ({
         <div
           role="group"
           aria-label="Seleziona livello zoom"
-          className="inline-flex items-center gap-0.5 rounded-xl bg-purple-50/90 border border-purple-200/70 p-0.5"
+          className="inline-flex items-center gap-0.5 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-0.5"
         >
           {ZOOM_STEPS.map((step) => {
             const active = zoomLevel === step.id;
@@ -128,8 +128,8 @@ const ZoomControlBar: React.FC<ZoomControlBarProps> = ({
                   compact ? 'min-h-[26px] px-2 text-[10px]' : 'min-h-[28px] px-2.5 text-[11px]'
                 } rounded-lg font-semibold transition-colors whitespace-nowrap shrink-0 ${
                   active
-                    ? 'bg-stone-900 text-white shadow-xs'
-                    : 'text-stone-700 hover:text-stone-900'
+                    ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                 }`}
               >
                 {step.label}
@@ -146,7 +146,7 @@ const ZoomControlBar: React.FC<ZoomControlBarProps> = ({
           title="Zoom avanti: mostra più dettagli"
           className={`${
             compact ? 'min-h-[30px] min-w-[30px]' : 'min-h-[34px] min-w-[34px]'
-          } flex items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 hover:bg-stone-100 disabled:opacity-35 transition-colors`}
+          } flex items-center justify-center rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-35 transition-colors`}
         >
           <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
@@ -193,7 +193,7 @@ const AgendaModeTabs: React.FC<{
   <div
     role="tablist"
     aria-label="Modalità vista agenda"
-    className="grid grid-cols-3 items-center gap-1 rounded-xl bg-purple-50/90 border border-purple-200/70 p-1"
+    className="grid grid-cols-3 items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1"
   >
     {AGENDA_MODE_TABS.map((tab) => {
       const active = agendaMode === tab.id;
@@ -206,8 +206,8 @@ const AgendaModeTabs: React.FC<{
           onClick={() => onChangeAgendaMode(tab.id)}
           className={`min-h-[36px] rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
             active
-              ? 'bg-stone-900 text-white shadow-xs'
-              : 'text-stone-700 hover:text-stone-900'
+              ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+              : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
           }`}
         >
           {tab.label}
@@ -252,20 +252,20 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
       id: 'daily_controls',
       render: () => (
         /* Compact Mode Tabs + Day Selector + 7-day strip + Zoom Block */
-        <div className="rounded-3xl border border-stone-900/12 bg-white p-3 sm:p-3.5 shadow-xs space-y-3">
+        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3 sm:p-3.5 shadow-xs space-y-3">
           <AgendaModeTabs agendaMode={agendaMode} onChangeAgendaMode={onChangeAgendaMode} />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
               <CatIllustration
                 src={dailyNeko.src}
                 alt={dailyNeko.alt}
-                className="h-12 w-12 rounded-2xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8] shrink-0"
+                className="h-12 w-12 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
               />
               <div className="min-w-0">
-                <h2 className="text-sm sm:text-base font-bold capitalize text-stone-900 truncate">
+                <h2 className="text-sm sm:text-base font-bold capitalize text-[var(--app-text)] truncate">
                   {formatItalianDateLong(selectedDate)}
                 </h2>
-                <p className="text-[11px] text-stone-500 tabular-nums">
+                <p className="text-[11px] text-[var(--app-text-muted)] tabular-nums">
                   {visibleEntries.length === 0
                     ? 'Nessun appunto'
                     : `${visibleEntries.length} ${
@@ -280,14 +280,14 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
                 type="button"
                 onClick={() => onSelectDate(addDaysISO(selectedDate, -1))}
                 aria-label="Giorno precedente"
-                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100 transition-colors"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] transition-colors"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => onSelectDate(todayISO)}
-                className="min-h-[36px] rounded-xl border border-stone-200 px-2.5 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-100 transition-colors whitespace-nowrap"
+                className="min-h-[36px] rounded-xl border border-[var(--app-border)] px-2.5 py-1 text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-card-alt)] transition-colors whitespace-nowrap"
               >
                 Oggi
               </button>
@@ -295,14 +295,14 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
                 type="button"
                 onClick={() => onSelectDate(addDaysISO(selectedDate, 1))}
                 aria-label="Giorno successivo"
-                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100 transition-colors"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] transition-colors"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => onCreateBlankEntry(selectedDate)}
-                className="min-h-[36px] inline-flex items-center gap-1 rounded-xl bg-stone-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-stone-800 transition-colors whitespace-nowrap"
+                className="min-h-[36px] inline-flex items-center gap-1 rounded-xl bg-[var(--app-btn-bg)] px-2.5 py-1 text-xs font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] transition-colors whitespace-nowrap"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 <span className="hidden sm:inline">Appunto</span>
@@ -326,15 +326,15 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
                   onClick={() => onSelectDate(iso)}
                   className={`min-h-[44px] flex flex-col items-center justify-center rounded-xl py-1 px-0.5 transition-colors ${
                     isSelected
-                      ? 'bg-stone-900 text-white'
+                      ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
                       : isToday
-                        ? 'bg-purple-50 text-purple-950 border border-purple-200 hover:bg-purple-100/70'
-                        : 'bg-[#FAF7F0] text-stone-700 hover:bg-stone-100'
+                        ? 'bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] border border-[var(--app-accent-soft-border)] hover:opacity-90'
+                        : 'bg-[var(--app-bg)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]'
                   }`}
                 >
                   <span
                     className={`text-[9px] uppercase tracking-wide ${
-                      isSelected ? 'text-purple-200' : 'text-stone-500'
+                      isSelected ? 'opacity-80' : 'text-[var(--app-text-subtle)]'
                     }`}
                   >
                     {formatItalianWeekdayShort(iso)}
@@ -346,8 +346,8 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
                     className={`mt-0.5 h-1 w-1 rounded-full ${
                       count > 0
                         ? isSelected
-                          ? 'bg-purple-300'
-                          : 'bg-purple-500'
+                          ? 'bg-[var(--app-btn-text)] opacity-85'
+                          : 'bg-[var(--app-accent)]'
                         : 'bg-transparent'
                     }`}
                     aria-hidden="true"
@@ -358,7 +358,7 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
           </div>
 
           {/* Compact Daily Zoom Bar */}
-          <div className="mt-2.5 border-t border-stone-100 pt-2">
+          <div className="mt-2.5 border-t border-[var(--app-divider)] pt-2">
             <ZoomControlBar zoomLevel={zoomLevel} onChangeZoom={setZoomLevel} compact />
           </div>
         </div>
@@ -368,25 +368,25 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
       id: 'daily_notes',
       render: () =>
         !selectedDayNote || visibleEntries.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-purple-300/80 bg-white/95 p-7 text-center">
+          <div className="rounded-3xl border border-dashed border-[var(--app-accent-soft-border)] bg-[var(--app-card)] p-7 text-center">
             <CatIllustration
               src={dailyEmptyNeko.src}
               alt={dailyEmptyNeko.alt}
-              className="mx-auto h-32 w-32 rounded-3xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8]"
+              className="mx-auto h-32 w-32 rounded-3xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)]"
             />
-            <h3 className="mt-4 text-sm font-bold text-stone-900">
+            <h3 className="mt-4 text-sm font-bold text-[var(--app-text)]">
               {selectedDayNote && selectedDayNote.entries.length > 0
                 ? 'Nessun appunto corrisponde ai filtri'
                 : 'Giornata pronta per i tuoi pensieri'}
             </h3>
-            <p className="mt-1 text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
+            <p className="mt-1 text-xs text-[var(--app-text-muted)] max-w-sm mx-auto leading-relaxed">
               Tutte le registrazioni vocali o i testi aggiunti oggi confluiranno con il proprio
               orario nella nota del {formatItalianDateShort(selectedDate)}.
             </p>
             <button
               type="button"
               onClick={() => onCreateBlankEntry(selectedDate)}
-              className="mt-4 min-h-[44px] inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2 text-xs font-semibold text-white hover:bg-stone-800 transition-colors"
+              className="mt-4 min-h-[44px] inline-flex items-center gap-2 rounded-xl bg-[var(--app-btn-bg)] px-4 py-2 text-xs font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] transition-colors"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
               Aggiungi appunto manuale
@@ -454,6 +454,18 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
   const endLabel = formatItalianDateShort(weekDays[6]);
 
   const [zoomLevel, setZoomLevel] = usePersistedZoom('agendavoce_weekly_zoom_v1', defaultZoomLevel);
+  const todayCardRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      todayCardRef.current?.scrollIntoView({
+        behavior: 'auto',
+        inline: 'center',
+        block: 'nearest',
+      });
+    }, 30);
+    return () => window.clearTimeout(timer);
+  }, [todayISO, zoomLevel, weekDays[0]]);
 
   const totalWeekEntries = weekDays.reduce((acc, iso) => {
     const dayNote = dailyNotes.find((d) => d.date === iso);
@@ -465,20 +477,20 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
     {
       id: 'weekly_controls',
       render: () => (
-        <div className="rounded-3xl border border-stone-900/12 bg-white p-3.5 sm:p-4 space-y-3 shadow-xs">
+        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3.5 sm:p-4 space-y-3 shadow-xs">
           <AgendaModeTabs agendaMode={agendaMode} onChangeAgendaMode={onChangeAgendaMode} />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <CatIllustration
                 src={weeklyNeko.src}
                 alt={weeklyNeko.alt}
-                className="h-14 w-14 rounded-2xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8] shrink-0"
+                className="h-14 w-14 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
               />
               <div className="min-w-0">
-                <h2 className="text-base sm:text-lg font-bold text-stone-900 truncate">
+                <h2 className="text-base sm:text-lg font-bold text-[var(--app-text)] truncate">
                   Settimana {startLabel} – {endLabel}
                 </h2>
-                <p className="text-xs text-stone-500 mt-0.5 tabular-nums">
+                <p className="text-xs text-[var(--app-text-muted)] mt-0.5 tabular-nums">
                   {totalWeekEntries} {totalWeekEntries === 1 ? 'appunto' : 'appunti'} · Scorri
                   orizzontalmente
                 </p>
@@ -490,14 +502,14 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
                 type="button"
                 onClick={() => onSelectDate(addDaysISO(selectedDate, -7))}
                 aria-label="Settimana precedente"
-                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100"
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => onSelectDate(todayISO)}
-                className="min-h-[40px] rounded-xl border border-stone-200 px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-100 whitespace-nowrap"
+                className="min-h-[40px] rounded-xl border border-[var(--app-border)] px-3 py-1.5 text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-card-alt)] whitespace-nowrap"
               >
                 Questa
               </button>
@@ -505,14 +517,14 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
                 type="button"
                 onClick={() => onSelectDate(addDaysISO(selectedDate, 7))}
                 aria-label="Settimana successiva"
-                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100"
+                className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>
 
-          <div className="border-t border-stone-100 pt-2.5">
+          <div className="border-t border-[var(--app-divider)] pt-2.5">
             <ZoomControlBar zoomLevel={zoomLevel} onChangeZoom={setZoomLevel} compact />
           </div>
         </div>
@@ -545,26 +557,27 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
             return (
               <div
                 key={iso}
+                ref={isToday ? todayCardRef : undefined}
                 className={`${cardWidthClass} shrink-0 snap-start flex flex-col rounded-2xl border transition-colors ${
                   isSelected
-                    ? 'border-stone-900 bg-white'
+                    ? 'border-[var(--app-accent)] bg-[var(--app-card)] ring-1 ring-[var(--app-accent)]/35'
                     : isToday
-                      ? 'border-purple-300 bg-purple-50/35'
-                      : 'border-stone-900/12 bg-white'
+                      ? 'border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)]'
+                      : 'border-[var(--app-border)] bg-[var(--app-card)]'
                 }`}
               >
-                <div className="flex items-center justify-between gap-1 pb-2 border-b border-stone-100">
+                <div className="flex items-center justify-between gap-1 pb-2 border-b border-[var(--app-divider)]">
                   <button
                     type="button"
                     onClick={() => onSelectDate(iso)}
                     className="flex items-baseline gap-1 text-left min-h-[32px] min-w-0"
                   >
-                    <span className="text-[11px] font-semibold capitalize text-stone-700 truncate">
+                    <span className="text-[11px] font-semibold capitalize text-[var(--app-text-muted)] truncate">
                       {formatItalianWeekdayShort(iso)}
                     </span>
                     <span
                       className={`font-mono text-xs sm:text-sm font-bold tabular-nums ${
-                        isToday ? 'text-purple-700' : 'text-stone-900'
+                        isToday ? 'text-[var(--app-accent-text)]' : 'text-[var(--app-text)]'
                       }`}
                     >
                       {dayNum}
@@ -578,8 +591,8 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
                         aria-label={dayNote.pinned ? 'Rimuovi spillo giorno' : 'Appunta giorno'}
                         className={`min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg transition-colors ${
                           dayNote.pinned
-                            ? 'text-purple-700 bg-purple-100/80'
-                            : 'text-stone-300 hover:text-stone-600'
+                            ? 'text-[var(--app-accent-text)] bg-[var(--app-accent-soft)]'
+                            : 'text-[var(--app-text-subtle)] hover:text-[var(--app-text)]'
                         }`}
                       >
                         <Pin
@@ -592,7 +605,7 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
                       type="button"
                       onClick={() => onCreateBlankEntry(iso)}
                       aria-label={`Aggiungi appunto il ${formatItalianDateShort(iso)}`}
-                      className="min-h-[28px] min-w-[28px] flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+                      className="min-h-[28px] min-w-[28px] flex items-center justify-center rounded-lg text-[var(--app-text-subtle)] hover:bg-[var(--app-card-alt)] hover:text-[var(--app-text)]"
                     >
                       <Plus className="h-3.5 w-3.5" />
                     </button>
@@ -606,7 +619,7 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
                   }`}
                 >
                   {!dayNote || dayEntries.length === 0 ? (
-                    <p className="py-5 text-center text-[11px] text-stone-400">Libero</p>
+                    <p className="py-5 text-center text-[11px] text-[var(--app-text-subtle)]">Libero</p>
                   ) : zoomLevel === 'overview' ? (
                     /* Strictly vertical list of Time + Color in Weekly Overview */
                     dayEntries.map((entry) => {
@@ -617,7 +630,7 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
                           type="button"
                           onClick={() => onSelectEntry(dayNote, entry)}
                           title={`${entry.time} · ${colMeta.label}`}
-                          className={`w-full flex flex-col items-start gap-0.5 rounded-xl border border-stone-200/70 px-2 py-1.5 text-left transition-transform active:scale-[0.98] hover:border-stone-400 ${colMeta.highlightClass}`}
+                          className={`w-full flex flex-col items-start gap-0.5 rounded-xl border border-stone-200/70 dark:border-white/15 px-2 py-1.5 text-left transition-transform active:scale-[0.98] hover:border-stone-400 ${colMeta.highlightClass}`}
                         >
                           <div className="flex w-full items-center justify-between gap-1">
                             <span className="font-mono text-[11px] font-bold tabular-nums">
@@ -642,13 +655,13 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
                           key={entry.id}
                           type="button"
                           onClick={() => onSelectEntry(dayNote, entry)}
-                          className="w-full rounded-xl border border-stone-100 bg-white p-2.5 text-left hover:border-purple-300 transition-colors"
+                          className="w-full rounded-xl border border-[var(--app-divider)] bg-[var(--app-card)] p-2.5 text-left hover:border-[var(--app-accent-soft-border)] transition-colors"
                         >
                           <div className="flex items-center justify-between gap-1.5">
-                            <span className="font-mono text-[11px] font-semibold text-stone-900 tabular-nums">
+                            <span className="font-mono text-[11px] font-semibold text-[var(--app-text)] tabular-nums">
                               {entry.time}
                             </span>
-                            <span className="inline-flex items-center gap-1 text-[10px] text-stone-600">
+                            <span className="inline-flex items-center gap-1 text-[10px] text-[var(--app-text-muted)]">
                               <span
                                 className={`h-2 w-2 rounded-full border shrink-0 ${colMeta.swatchClass}`}
                                 aria-hidden="true"
@@ -675,11 +688,11 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
 
                           {/* Show ALL sensation synthesis bullets */}
                           {entry.bullets && entry.bullets.length > 0 && (
-                            <ul className="mt-2 space-y-1 text-[11px] text-stone-600">
+                            <ul className="mt-2 space-y-1 text-[11px] text-[var(--app-text-muted)]">
                               {entry.bullets.map((bullet, bIdx) => (
                                 <li key={bIdx} className="flex items-start gap-1.5 leading-snug">
                                   <span
-                                    className="mt-1.5 h-1 w-1 rounded-full bg-purple-400 shrink-0"
+                                    className="mt-1.5 h-1 w-1 rounded-full bg-[var(--app-accent)] shrink-0"
                                     aria-hidden="true"
                                   />
                                   <span>{bullet}</span>
@@ -755,7 +768,7 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
     {
       id: 'monthly_calendar',
       render: () => (
-        <div className="rounded-3xl border border-stone-900/12 bg-white p-3.5 sm:p-5 shadow-xs">
+        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3.5 sm:p-5 shadow-xs">
           <div className="mb-3">
             <AgendaModeTabs agendaMode={agendaMode} onChangeAgendaMode={onChangeAgendaMode} />
           </div>
@@ -765,9 +778,9 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
               <CatIllustration
                 src={monthlyNeko.src}
                 alt={monthlyNeko.alt}
-                className="h-11 w-11 sm:h-14 sm:w-14 rounded-2xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8] shrink-0"
+                className="h-11 w-11 sm:h-14 sm:w-14 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
               />
-              <h2 className="text-[13px] sm:text-base font-bold capitalize text-stone-900 leading-tight">
+              <h2 className="text-[13px] sm:text-base font-bold capitalize text-[var(--app-text)] leading-tight">
                 {formatItalianMonthYear(year, monthIndex)}
               </h2>
             </div>
@@ -776,14 +789,14 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
                 type="button"
                 onClick={() => shiftMonth(-1)}
                 aria-label="Mese precedente"
-                className="min-h-[34px] min-w-[34px] sm:min-h-[40px] sm:min-w-[40px] flex items-center justify-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100"
+                className="min-h-[34px] min-w-[34px] sm:min-h-[40px] sm:min-w-[40px] flex items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]"
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => onSelectDate(todayISO)}
-                className="min-h-[34px] sm:min-h-[40px] rounded-xl border border-stone-200 px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-100 whitespace-nowrap"
+                className="min-h-[34px] sm:min-h-[40px] rounded-xl border border-[var(--app-border)] px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-card-alt)] whitespace-nowrap"
               >
                 Oggi
               </button>
@@ -791,7 +804,7 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
                 type="button"
                 onClick={() => shiftMonth(1)}
                 aria-label="Mese successivo"
-                className="min-h-[34px] min-w-[34px] sm:min-h-[40px] sm:min-w-[40px] flex items-center justify-center rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100"
+                className="min-h-[34px] min-w-[34px] sm:min-h-[40px] sm:min-w-[40px] flex items-center justify-center rounded-xl border border-[var(--app-border)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
@@ -801,7 +814,7 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
           {/* Weekday Headers */}
           <div className="mt-4 grid grid-cols-7 gap-1 text-center">
             {weekdayHeaders.map((wd) => (
-              <div key={wd} className="py-1.5 text-[11px] font-semibold text-stone-400">
+              <div key={wd} className="py-1.5 text-[11px] font-semibold text-[var(--app-text-subtle)]">
                 {wd}
               </div>
             ))}
@@ -822,12 +835,12 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
                   onClick={() => onSelectDate(cell.isoDate)}
                   className={`min-h-[54px] sm:min-h-[68px] flex flex-col items-start justify-between rounded-xl border p-1.5 sm:p-2 text-left transition-colors ${
                     isSelected
-                      ? 'border-stone-900 bg-stone-900 text-white'
+                      ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
                       : isToday
-                        ? 'border-purple-300 bg-purple-50/70 text-stone-900'
+                        ? 'border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)] text-[var(--app-text)]'
                         : cell.inCurrentMonth
-                          ? 'border-stone-200/80 bg-white text-stone-900 hover:border-purple-300'
-                          : 'border-transparent bg-[#FAF7F0] text-stone-400 hover:bg-stone-100/70'
+                          ? 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text)] hover:border-[var(--app-accent-soft-border)]'
+                          : 'border-transparent bg-[var(--app-bg)] text-[var(--app-text-subtle)] hover:bg-[var(--app-card-alt)]'
                   }`}
                 >
                   <span className="font-mono text-xs font-semibold tabular-nums">
@@ -848,7 +861,7 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
                       </div>
                       <span
                         className={`font-mono text-[10px] tabular-nums ${
-                          isSelected ? 'text-purple-200' : 'text-stone-500'
+                          isSelected ? 'opacity-80' : 'text-[var(--app-text-muted)]'
                         }`}
                       >
                         {cellEntries.length}
@@ -868,10 +881,10 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2 px-1">
             <div>
-              <h3 className="text-sm font-semibold capitalize text-stone-900">
+              <h3 className="text-sm font-semibold capitalize text-[var(--app-text)]">
                 {formatItalianDateLong(selectedDate)}
               </h3>
-              <p className="text-xs text-stone-500 tabular-nums">
+              <p className="text-xs text-[var(--app-text-muted)] tabular-nums">
                 {selectedDayEntries.length}{' '}
                 {selectedDayEntries.length === 1 ? 'appunto nella nota' : 'appunti nella nota'}
               </p>
@@ -879,7 +892,7 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
             <button
               type="button"
               onClick={() => onCreateBlankEntry(selectedDate)}
-              className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+              className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-3 py-1.5 text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-card-alt)]"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               Nuovo appunto
@@ -887,11 +900,11 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
           </div>
 
           {!selectedDayNote || selectedDayEntries.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-purple-300/80 bg-white/90 p-6 text-center text-xs text-stone-500">
+            <div className="rounded-3xl border border-dashed border-[var(--app-accent-soft-border)] bg-[var(--app-card)] p-6 text-center text-xs text-[var(--app-text-muted)]">
               <CatIllustration
                 src={monthlyEmptyDayNeko.src}
                 alt={monthlyEmptyDayNeko.alt}
-                className="mx-auto mb-3 h-28 w-28 rounded-3xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8]"
+                className="mx-auto mb-3 h-28 w-28 rounded-3xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)]"
               />
               Nessun appunto salvato per questo giorno.
             </div>

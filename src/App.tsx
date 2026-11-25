@@ -65,8 +65,10 @@ import {
 } from './utils/dailyCompanionQuotes';
 import { NOTE_COLOR_LIST, NOTE_COLORS, VALID_NOTE_COLORS } from './utils/noteColors';
 import { CHIBI_CAT_MASCOTS } from './utils/nekoCatalog';
+import { parseApiJsonSafe } from './utils/apiError';
 import { publishQuotaSnapshot } from './utils/quotaTracker';
 import { extractRemindersLocally } from './utils/reminderExtractor';
+import { applyThemeToDocument, subscribeSystemThemeChanges } from './utils/themeSystem';
 
 const STORAGE_KEY = 'agendavoce_daily_notes_v2';
 const LEGACY_STORAGE_KEY = 'agendavoce_notes_v1';
@@ -262,7 +264,8 @@ export default function App() {
   const [mobileTab, setMobileTab] = useState<MobileTab>(
     initialUrlParams.section === 'todo' ? 'todo' : 'record'
   );
-  const [todoSubTab, setTodoSubTab] = useState<TodoSubTab>('da_fare');
+  const [todoSubTab, setTodoSubTab] = useState<TodoSubTab>('organizza');
+  const [organizeFocusTodayKey, setOrganizeFocusTodayKey] = useState<number>(0);
   const [todoSubMenuOpen, setTodoSubMenuOpen] = useState(false);
   const [layouts, setLayouts] = useState<AllLayoutPreferences>(loadAllLayoutPreferences);
   const [settings, setSettings] = useState<AppSettings>(loadAppSettings);
@@ -278,6 +281,25 @@ export default function App() {
     getInitialLaunchQuoteOffset(toISODate(new Date()))
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const launchNumberRef = useRef<number | null>(null);
+  if (launchNumberRef.current === null && typeof window !== 'undefined') {
+    let sessionNum = 0;
+    try {
+      const existingSession = sessionStorage.getItem('miciomiao_session_launch_num_v1');
+      if (existingSession) {
+        sessionNum = parseInt(existingSession, 10) || 1;
+      } else {
+        const prevCount = parseInt(localStorage.getItem('miciomiao_launch_count_v1') || '0', 10) || 0;
+        sessionNum = prevCount + 1;
+        localStorage.setItem('miciomiao_launch_count_v1', String(sessionNum));
+        sessionStorage.setItem('miciomiao_session_launch_num_v1', String(sessionNum));
+      }
+    } catch {
+      sessionNum = 1;
+    }
+    launchNumberRef.current = sessionNum;
+  }
 
   const hiddenAtRef = useRef<number | null>(null);
   const autoBackupRunningRef = useRef(false);
@@ -386,9 +408,13 @@ export default function App() {
     [computeBackupSignature]
   );
 
-  // Automatic backup on app open (once per launch session) & on app close/hide when data changed
+  // Automatic backup ONLY every 3 launches and ONLY on open/permanent close (NOT when backgrounded)
   useEffect(() => {
     if (!settings.autoBackupOnOpenClose) return;
+    const launchNum = launchNumberRef.current ?? 1;
+    const isThirdLaunch = launchNum > 0 && launchNum % 3 === 0;
+    if (!isThirdLaunch) return;
+
     let openTimer: number | undefined;
     try {
       if (sessionStorage.getItem('miciomiao_open_backup_done') !== '1') {
@@ -407,21 +433,21 @@ export default function App() {
       }, 1200);
     }
 
-    const onVisibilityLeave = () => {
-      if (document.visibilityState === 'hidden') {
-        void triggerAutomaticBackup('close');
-      }
+    const onPageHide = (e: PageTransitionEvent) => {
+      // Only when truly unloading/closing permanently, NOT when entering background/bfcache
+      if (e.persisted) return;
+      void triggerAutomaticBackup('close');
     };
-    const onPageHide = () => {
+    const onBeforeUnload = () => {
       void triggerAutomaticBackup('close');
     };
 
-    document.addEventListener('visibilitychange', onVisibilityLeave);
     window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
       if (openTimer) window.clearTimeout(openTimer);
-      document.removeEventListener('visibilitychange', onVisibilityLeave);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
     };
   }, [settings.autoBackupOnOpenClose, triggerAutomaticBackup]);
 
@@ -434,17 +460,20 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => {
+    applyThemeToDocument(settings);
+    if (settings.themeMode !== 'auto') return;
+    return subscribeSystemThemeChanges(() => {
+      applyThemeToDocument(settings);
+    });
+  }, [settings]);
+
+  useEffect(() => {
     if (typeof document === 'undefined') return;
     document.title = 'MicioMiao — Note Vocali & Agenda iOS';
 
     const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (appleTitleMeta) {
       appleTitleMeta.setAttribute('content', 'MicioMiao');
-    }
-
-    const themeColorMeta = document.querySelector('meta[name="theme-color"]');
-    if (themeColorMeta) {
-      themeColorMeta.setAttribute('content', '#FAF7F0');
     }
   }, []);
 
@@ -709,18 +738,18 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: combinedText, isDailyOverview: true }),
       });
-      const raw = await res.text();
-      let data: { bullets?: unknown; quota?: unknown; error?: string } = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { error: raw };
-      }
-      if (data?.quota) {
+      const data = await parseApiJsonSafe<{
+        bullets?: unknown;
+        quota?: unknown;
+        error?: string;
+      }>(res);
+      if (data.quota) {
         publishQuotaSnapshot(data.quota);
       }
       if (!res.ok) {
-        throw new Error(data.error || 'Impossibile generare la sintesi del giorno.');
+        throw new Error(
+          data.error || 'Impossibile generare la sintesi del giorno.'
+        );
       }
       const bullets = Array.isArray(data.bullets)
         ? data.bullets.map((b) => String(b ?? '').trim()).filter(Boolean)
@@ -896,6 +925,9 @@ export default function App() {
 
 
   const selectDesktopAgendaMode = (mode: AgendaViewMode) => {
+    if (mode === 'week') {
+      setSelectedDate(toISODate(new Date()));
+    }
     setAgendaMode(mode);
     setDesktopSection(mode);
     setMobileTab('agenda');
@@ -938,11 +970,11 @@ export default function App() {
     {
       id: 'cat_companion',
       render: () => (
-        <div className="rounded-3xl border border-purple-200/80 bg-[#FAF5E8] p-4 shadow-xs">
+        <div className="rounded-3xl border border-[var(--app-companion-border)] bg-[var(--app-companion-bg)] p-4 shadow-xs">
           <div className="flex items-center justify-between gap-2 mb-2.5">
             <div className="min-w-0">
-              <p className="text-xs font-bold text-stone-900">Compagno del giorno</p>
-              <p className="text-[11px] font-medium text-purple-800">
+              <p className="text-xs font-bold text-[var(--app-text)]">Compagno del giorno</p>
+              <p className="text-[11px] font-medium text-[var(--app-accent-text)]">
                 {dailyQuote.category} · {dailyQuote.themeLabel}
               </p>
             </div>
@@ -956,9 +988,9 @@ export default function App() {
                 })
               }
               aria-label="Mostra un'altra frase del giorno"
-              className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-purple-200 bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-stone-700 hover:border-purple-300 hover:text-stone-900 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-[var(--app-accent-soft-border)] bg-[var(--app-card)] px-2.5 py-1 text-[11px] font-semibold text-[var(--app-text-muted)] hover:border-[var(--app-accent)] hover:text-[var(--app-text)] transition-colors whitespace-nowrap shrink-0"
             >
-              <RefreshCw className="h-3 w-3 text-purple-700" aria-hidden="true" />
+              <RefreshCw className="h-3 w-3 text-[var(--app-accent)]" aria-hidden="true" />
               Altra frase
             </button>
           </div>
@@ -967,18 +999,18 @@ export default function App() {
             <CatIllustration
               src={companionNeko.src}
               alt={companionNeko.alt}
-              className="h-24 w-24 rounded-2xl object-cover border-2 border-stone-900/15 bg-white shrink-0"
+              className="h-24 w-24 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-white shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <blockquote className="text-xs sm:text-[13px] text-stone-800 leading-relaxed font-medium">
+              <blockquote className="text-xs sm:text-[13px] text-[var(--app-text)] leading-relaxed font-medium">
                 “{dailyQuote.text}”
               </blockquote>
               {dailyQuote.author && (
-                <p className="mt-1 text-[11px] font-semibold text-stone-500">
+                <p className="mt-1 text-[11px] font-semibold text-[var(--app-text-subtle)]">
                   — {dailyQuote.author}
                 </p>
               )}
-              <p className="mt-2 font-mono text-[11px] font-semibold text-purple-800 tabular-nums">
+              <p className="mt-2 font-mono text-[11px] font-semibold text-[var(--app-accent-text)] tabular-nums">
                 {dailyNotes.reduce((acc, d) => acc + d.entries.length, 0)} appunti totali salvati
               </p>
             </div>
@@ -989,19 +1021,19 @@ export default function App() {
     {
       id: 'quick_pinned',
       render: () => (
-        <div className="rounded-3xl border border-stone-900/12 bg-white p-4 shadow-xs">
+        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 shadow-xs">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-sm font-bold text-stone-900">
-              <Pin className="h-4 w-4 text-purple-700 fill-current" aria-hidden="true" />
+            <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--app-text)]">
+              <Pin className="h-4 w-4 text-[var(--app-accent)] fill-current" aria-hidden="true" />
               Giornate appuntate
             </h2>
-            <span className="font-mono text-xs text-stone-400 tabular-nums">
+            <span className="font-mono text-xs text-[var(--app-text-subtle)] tabular-nums">
               {pinnedDailyNotes.length}
             </span>
           </div>
 
           {pinnedDailyNotes.length === 0 ? (
-            <p className="mt-2.5 text-xs text-stone-500 leading-relaxed">
+            <p className="mt-2.5 text-xs text-[var(--app-text-muted)] leading-relaxed">
               Tocca l’icona spillo su una nota giornaliera per tenerla sempre in evidenza qui.
             </p>
           ) : (
@@ -1027,7 +1059,7 @@ export default function App() {
                     setMobileTab('pinned');
                     setTodoSubMenuOpen(false);
                   }}
-                  className="w-full py-2 text-xs font-semibold text-purple-800 hover:text-purple-950"
+                  className="w-full py-2 text-xs font-semibold text-[var(--app-accent-text)] hover:opacity-80"
                 >
                   Vedi tutte ({pinnedDailyNotes.length})
                 </button>
@@ -1051,19 +1083,19 @@ export default function App() {
     {
       id: 'pinned_summary',
       render: () => (
-        <div className="rounded-3xl border border-stone-900/12 bg-white p-4 flex items-center justify-between gap-3 shadow-xs">
+        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 flex items-center justify-between gap-3 shadow-xs">
           <div className="flex items-center gap-3 min-w-0">
             <CatIllustration
               src={pinnedNeko.src}
               alt={pinnedNeko.alt}
-              className="h-14 w-14 rounded-2xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8] shrink-0"
+              className="h-14 w-14 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
             />
             <div className="min-w-0">
-              <h2 className="flex items-center gap-2 text-base font-bold text-stone-900 truncate">
-                <Pin className="h-4 w-4 text-purple-700 fill-current shrink-0" aria-hidden="true" />
+              <h2 className="flex items-center gap-2 text-base font-bold text-[var(--app-text)] truncate">
+                <Pin className="h-4 w-4 text-[var(--app-accent)] fill-current shrink-0" aria-hidden="true" />
                 Giornate appuntate
               </h2>
-              <p className="text-xs text-stone-500">
+              <p className="text-xs text-[var(--app-text-muted)]">
                 {pinnedDailyNotes.length}{' '}
                 {pinnedDailyNotes.length === 1 ? 'giornata fissata' : 'giornate fissate'}
               </p>
@@ -1072,7 +1104,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => selectDesktopAgendaMode(agendaMode)}
-            className="text-xs font-semibold text-purple-700 hover:underline whitespace-nowrap"
+            className="text-xs font-semibold text-[var(--app-accent-text)] hover:underline whitespace-nowrap"
           >
             Torna all’agenda
           </button>
@@ -1083,16 +1115,16 @@ export default function App() {
       id: 'pinned_list',
       render: () =>
         pinnedDailyNotes.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-purple-300/80 bg-white/90 p-8 text-center">
+          <div className="rounded-3xl border border-dashed border-[var(--app-accent-soft-border)] bg-[var(--app-card)] p-8 text-center">
             <CatIllustration
               src={pinnedNeko.src}
               alt={pinnedNeko.alt}
-              className="mx-auto h-32 w-32 rounded-3xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8]"
+              className="mx-auto h-32 w-32 rounded-3xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)]"
             />
-            <h3 className="mt-3 text-sm font-bold text-stone-900">
+            <h3 className="mt-3 text-sm font-bold text-[var(--app-text)]">
               Nessuna giornata appuntata
             </h3>
-            <p className="mt-1 text-xs text-stone-500 max-w-xs mx-auto leading-relaxed">
+            <p className="mt-1 text-xs text-[var(--app-text-muted)] max-w-xs mx-auto leading-relaxed">
               Usa l’icona spillo su qualsiasi nota giornaliera per aggiungerla qui.
             </p>
           </div>
@@ -1119,9 +1151,9 @@ export default function App() {
 
 
   return (
-    <div className="min-h-dvh bg-[#FAF7F0] text-stone-900 pb-20 lg:pb-10">
+    <div className="min-h-dvh bg-[var(--app-bg)] text-[var(--app-text)] pb-20 lg:pb-10 transition-colors">
       {/* Desktop Top Bar (Strict 3-zone contract) */}
-      <header className="hidden lg:block sticky top-0 z-30 border-b border-stone-900/10 bg-[#FAF7F0]/90 backdrop-blur-md">
+      <header className="hidden lg:block sticky top-0 z-30 border-b border-[var(--app-border)] bg-[var(--app-header-bg)] backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-2 xl:gap-5 px-3 xl:px-6">
           {/* Zone 1: Single text element wordmark */}
           <a
@@ -1132,7 +1164,7 @@ export default function App() {
               setTodoSubMenuOpen(false);
               document.getElementById('recorder')?.scrollIntoView({ behavior: 'smooth' });
             }}
-            className="text-base xl:text-lg font-bold tracking-tight text-stone-900 whitespace-nowrap shrink-0"
+            className="text-base xl:text-lg font-bold tracking-tight text-[var(--app-text)] whitespace-nowrap shrink-0"
           >
             MicioMiao
           </a>
@@ -1144,8 +1176,8 @@ export default function App() {
               onClick={() => selectDesktopAgendaMode('day')}
               className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                 desktopSection === 'day'
-                  ? 'border-purple-600 text-stone-900 font-semibold'
-                  : 'border-transparent text-stone-600 hover:text-stone-900'
+                  ? 'border-[var(--app-accent)] text-[var(--app-text)] font-semibold'
+                  : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               Giornaliera
@@ -1155,8 +1187,8 @@ export default function App() {
               onClick={() => selectDesktopAgendaMode('week')}
               className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                 desktopSection === 'week'
-                  ? 'border-purple-600 text-stone-900 font-semibold'
-                  : 'border-transparent text-stone-600 hover:text-stone-900'
+                  ? 'border-[var(--app-accent)] text-[var(--app-text)] font-semibold'
+                  : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               Settimanale
@@ -1166,8 +1198,8 @@ export default function App() {
               onClick={() => selectDesktopAgendaMode('month')}
               className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                 desktopSection === 'month'
-                  ? 'border-purple-600 text-stone-900 font-semibold'
-                  : 'border-transparent text-stone-600 hover:text-stone-900'
+                  ? 'border-[var(--app-accent)] text-[var(--app-text)] font-semibold'
+                  : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               Mensile
@@ -1181,8 +1213,8 @@ export default function App() {
               }}
               className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                 desktopSection === 'stats'
-                  ? 'border-purple-600 text-stone-900 font-semibold'
-                  : 'border-transparent text-stone-600 hover:text-stone-900'
+                  ? 'border-[var(--app-accent)] text-[var(--app-text)] font-semibold'
+                  : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               Statistiche
@@ -1196,8 +1228,8 @@ export default function App() {
               }}
               className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                 desktopSection === 'pinned'
-                  ? 'border-purple-600 text-stone-900 font-semibold'
-                  : 'border-transparent text-stone-600 hover:text-stone-900'
+                  ? 'border-[var(--app-accent)] text-[var(--app-text)] font-semibold'
+                  : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               Appuntate
@@ -1211,8 +1243,8 @@ export default function App() {
               }}
               className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                 desktopSection === 'reminders'
-                  ? 'border-purple-600 text-stone-900 font-semibold'
-                  : 'border-transparent text-stone-600 hover:text-stone-900'
+                  ? 'border-[var(--app-accent)] text-[var(--app-text)] font-semibold'
+                  : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               Promemoria
@@ -1224,17 +1256,19 @@ export default function App() {
                 aria-expanded={todoSubMenuOpen && desktopSection === 'todo'}
                 onClick={() => {
                   if (desktopSection !== 'todo') {
+                    setTodoSubTab('organizza');
+                    setOrganizeFocusTodayKey((k) => k + 1);
                     setDesktopSection('todo');
                     setMobileTab('todo');
-                    setTodoSubMenuOpen(true);
+                    setTodoSubMenuOpen(false);
                   } else {
                     setTodoSubMenuOpen((prev) => !prev);
                   }
                 }}
                 className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                   desktopSection === 'todo'
-                    ? 'border-[#0D8A7E] text-[#083B37] font-semibold'
-                    : 'border-transparent text-[#0E645D] hover:text-[#083B37]'
+                    ? 'border-[var(--todo-accent)] text-[var(--todo-text)] font-semibold'
+                    : 'border-transparent text-[var(--todo-text-muted)] hover:text-[var(--todo-text)]'
                 }`}
               >
                 Da fare giornaliero
@@ -1244,7 +1278,7 @@ export default function App() {
                 <div
                   role="menu"
                   aria-label="Sottosezioni Da fare giornaliero"
-                  className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 z-50 flex items-center gap-1 rounded-xl border border-[#7ECBBF] bg-[#F7FEFC]/95 backdrop-blur-md p-1 shadow-lg"
+                  className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 z-50 flex items-center gap-1 rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-card)]/95 backdrop-blur-md p-1 shadow-lg"
                 >
                   <button
                     type="button"
@@ -1257,8 +1291,8 @@ export default function App() {
                     }}
                     className={`rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap ${
                       todoSubTab === 'da_fare'
-                        ? 'bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] text-white shadow-xs'
-                        : 'text-[#0B4F49] hover:bg-[#E5F9F4]'
+                        ? 'bg-gradient-to-b from-[var(--todo-accent)] to-[var(--todo-accent-dark)] text-white shadow-xs'
+                        : 'text-[var(--todo-text)] hover:bg-[var(--todo-surface-alt)]'
                     }`}
                   >
                     Da Fare
@@ -1268,14 +1302,15 @@ export default function App() {
                     role="menuitem"
                     onClick={() => {
                       setTodoSubTab('organizza');
+                      setOrganizeFocusTodayKey((k) => k + 1);
                       setDesktopSection('todo');
                       setMobileTab('todo');
                       setTodoSubMenuOpen(false);
                     }}
                     className={`rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap ${
                       todoSubTab === 'organizza'
-                        ? 'bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] text-white shadow-xs'
-                        : 'text-[#0B4F49] hover:bg-[#E5F9F4]'
+                        ? 'bg-gradient-to-b from-[var(--todo-accent)] to-[var(--todo-accent-dark)] text-white shadow-xs'
+                        : 'text-[var(--todo-text)] hover:bg-[var(--todo-surface-alt)]'
                     }`}
                   >
                     Organizza
@@ -1293,8 +1328,8 @@ export default function App() {
               }}
               className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                 desktopSection === 'settings'
-                  ? 'border-purple-600 text-stone-900 font-semibold'
-                  : 'border-transparent text-stone-600 hover:text-stone-900'
+                  ? 'border-[var(--app-accent)] text-[var(--app-text)] font-semibold'
+                  : 'border-transparent text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
               }`}
             >
               Impostazioni
@@ -1306,9 +1341,9 @@ export default function App() {
             <button
               type="button"
               onClick={() => handleCreateBlankEntry(selectedDate)}
-              className="inline-flex min-h-[38px] xl:min-h-[40px] items-center gap-1.5 rounded-xl bg-stone-900 px-3 xl:px-4 py-2 text-[11.5px] xl:text-xs font-semibold text-white hover:bg-stone-800 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex min-h-[38px] xl:min-h-[40px] items-center gap-1.5 rounded-xl bg-[var(--app-btn-bg)] px-3 xl:px-4 py-2 text-[11.5px] xl:text-xs font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] transition-colors whitespace-nowrap shrink-0"
             >
-              <Plus className="h-4 w-4 text-purple-300" aria-hidden="true" />
+              <Plus className="h-4 w-4 text-[var(--app-accent)]" aria-hidden="true" />
               <span className="hidden xl:inline">Nuovo appunto</span>
               <span className="xl:hidden">Nuovo</span>
             </button>
@@ -1316,23 +1351,23 @@ export default function App() {
         </div>
       </header>
 
-      {/* Mobile Compact Sticky Top Bar (44px, under 15% cap with bottom nav) */}
-      <header className="lg:hidden sticky top-0 z-30 border-b border-stone-900/10 bg-[#FAF7F0]/92 backdrop-blur-md pt-safe">
+      {/* Mobile Compact Sticky Top Bar */}
+      <header className="lg:hidden sticky top-0 z-30 border-b border-[var(--app-border)] bg-[var(--app-header-bg)] backdrop-blur-md pt-safe">
         <div className="flex h-11 items-center justify-between gap-3 px-4">
           <div className="flex items-center gap-2 min-w-0">
             <CatIllustration
               src={CHIBI_CAT_MASCOTS.mic.src}
               alt={CHIBI_CAT_MASCOTS.mic.alt}
-              className="h-7 w-7 rounded-lg object-cover border border-stone-900/15 bg-[#FAF5E8] shrink-0"
+              className="h-7 w-7 rounded-lg object-cover border border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
             />
-            <span className="text-base font-bold tracking-tight text-stone-900 whitespace-nowrap shrink-0">
+            <span className="text-base font-bold tracking-tight text-[var(--app-text)] whitespace-nowrap shrink-0">
               MicioMiao
             </span>
           </div>
           <button
             type="button"
             onClick={() => handleCreateBlankEntry(selectedDate)}
-            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold text-purple-800 hover:bg-purple-100/60 whitespace-nowrap shrink-0"
+            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold text-[var(--app-accent-text)] hover:bg-[var(--app-accent-soft)] whitespace-nowrap shrink-0"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Scrivi
@@ -1368,11 +1403,11 @@ export default function App() {
           >
             {/* Workspace Search & Color Filter Toolbar (shown for Agenda & Pinned views) */}
             {!showStatsView && !showRemindersView && !showTodoView && !showSettingsView && (
-              <div className="rounded-3xl border border-stone-900/12 bg-white p-3 sm:p-4 space-y-3 shadow-xs">
+              <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3 sm:p-4 space-y-3 shadow-xs">
                 <QuotaStatusBar />
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   {showPinnedView && (
-                    <p className="text-xs font-semibold text-stone-700 px-1">
+                    <p className="text-xs font-semibold text-[var(--app-text-muted)] px-1">
                       Filtro rapido sulle giornate appuntate
                     </p>
                   )}
@@ -1380,7 +1415,7 @@ export default function App() {
                   {/* Search Input */}
                   <div className={`relative flex-1 ${showPinnedView ? 'sm:max-w-xs' : ''}`}>
                     <Search
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400"
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--app-text-subtle)]"
                       aria-hidden="true"
                     />
                     <input
@@ -1389,14 +1424,14 @@ export default function App() {
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Cerca nelle note e negli stati..."
                       aria-label="Cerca nelle note"
-                      className="w-full min-h-[40px] rounded-xl border border-stone-200 bg-[#FAF7F0] pl-9 pr-8 py-1.5 text-xs text-stone-900 placeholder:text-stone-400 focus:border-purple-500 focus:bg-white focus:outline-none"
+                      className="w-full min-h-[40px] rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-bg)] pl-9 pr-8 py-1.5 text-xs text-[var(--app-text)] placeholder:text-[var(--app-text-subtle)] focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
                     />
                     {searchQuery && (
                       <button
                         type="button"
                         onClick={() => setSearchQuery('')}
                         aria-label="Cancella ricerca"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-stone-400 hover:text-stone-700"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--app-text-subtle)] hover:text-[var(--app-text)]"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -1412,8 +1447,8 @@ export default function App() {
                     aria-pressed={colorFilter === 'all'}
                     className={`min-h-[34px] rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                       colorFilter === 'all'
-                        ? 'border-stone-900 bg-stone-900 text-white'
-                        : 'border-stone-200 bg-white text-stone-600 hover:border-purple-300'
+                        ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                        : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
                     }`}
                   >
                     Tutti i colori
@@ -1428,8 +1463,8 @@ export default function App() {
                         aria-pressed={active}
                         className={`min-h-[34px] inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                           active
-                            ? 'border-stone-900 bg-stone-900 text-white'
-                            : 'border-stone-200 bg-white text-stone-600 hover:border-purple-300'
+                            ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                            : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
                         }`}
                       >
                         <span
@@ -1463,6 +1498,7 @@ export default function App() {
             ) : showTodoView ? (
               <DailyTodoSection
                 subTab={todoSubTab}
+                focusTodaySignal={organizeFocusTodayKey}
                 dailyNotes={dailyNotes}
                 todoItems={todoItems}
                 organizeItems={organizeItems}
@@ -1572,10 +1608,10 @@ export default function App() {
         </div>
       </main>
 
-      {/* Mobile Bottom Tab Bar (Thumb-Zone Ergonomics, Proportional sizing so all labels read completely) */}
+      {/* Mobile Bottom Tab Bar */}
       <nav
         aria-label="Navigazione principale mobile"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-stone-900/10 bg-[#FAF7F0]/95 backdrop-blur-md pb-safe"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--app-border)] bg-[var(--app-header-bg)] backdrop-blur-md pb-safe"
       >
         <div className="flex h-[54px] items-stretch justify-between px-1">
           <button
@@ -1585,7 +1621,9 @@ export default function App() {
               setTodoSubMenuOpen(false);
             }}
             className={`flex flex-auto flex-col items-center justify-center gap-0.5 px-[3px] sm:px-1.5 transition-colors ${
-              mobileTab === 'record' ? 'text-purple-800 font-semibold' : 'text-stone-500 hover:text-stone-900'
+              mobileTab === 'record'
+                ? 'text-[var(--app-accent-text)] font-semibold'
+                : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
             }`}
           >
             <Mic className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
@@ -1597,6 +1635,9 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
+              if (mobileTab !== 'agenda' && agendaMode === 'week') {
+                setSelectedDate(toISODate(new Date()));
+              }
               setMobileTab('agenda');
               setTodoSubMenuOpen(false);
               if (
@@ -1610,7 +1651,9 @@ export default function App() {
               }
             }}
             className={`flex flex-auto flex-col items-center justify-center gap-0.5 px-[3px] sm:px-1.5 transition-colors ${
-              mobileTab === 'agenda' ? 'text-purple-800 font-semibold' : 'text-stone-500 hover:text-stone-900'
+              mobileTab === 'agenda'
+                ? 'text-[var(--app-accent-text)] font-semibold'
+                : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
             }`}
           >
             {agendaMode === 'month' ? (
@@ -1631,7 +1674,9 @@ export default function App() {
               setTodoSubMenuOpen(false);
             }}
             className={`flex flex-auto flex-col items-center justify-center gap-0.5 px-[3px] sm:px-1.5 transition-colors ${
-              mobileTab === 'stats' ? 'text-purple-800 font-semibold' : 'text-stone-500 hover:text-stone-900'
+              mobileTab === 'stats'
+                ? 'text-[var(--app-accent-text)] font-semibold'
+                : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
             }`}
           >
             <BarChart3 className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
@@ -1648,7 +1693,9 @@ export default function App() {
               setTodoSubMenuOpen(false);
             }}
             className={`flex flex-auto flex-col items-center justify-center gap-0.5 px-[3px] sm:px-1.5 transition-colors ${
-              mobileTab === 'pinned' ? 'text-purple-800 font-semibold' : 'text-stone-500 hover:text-stone-900'
+              mobileTab === 'pinned'
+                ? 'text-[var(--app-accent-text)] font-semibold'
+                : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
             }`}
           >
             <Pin className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
@@ -1665,7 +1712,9 @@ export default function App() {
               setTodoSubMenuOpen(false);
             }}
             className={`flex flex-auto flex-col items-center justify-center gap-0.5 px-[3px] sm:px-1.5 transition-colors ${
-              mobileTab === 'reminders' ? 'text-purple-800 font-semibold' : 'text-stone-500 hover:text-stone-900'
+              mobileTab === 'reminders'
+                ? 'text-[var(--app-accent-text)] font-semibold'
+                : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
             }`}
           >
             <Bell className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
@@ -1679,7 +1728,7 @@ export default function App() {
               <div
                 role="menu"
                 aria-label="Sottosezioni Da fare giornaliero"
-                className="absolute bottom-full right-0 mb-2 z-50 flex items-center gap-1 rounded-xl border border-[#7ECBBF] bg-[#F7FEFC]/95 backdrop-blur-md p-1 shadow-lg"
+                className="absolute bottom-full right-0 mb-2 z-50 flex items-center gap-1 rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-card)]/95 backdrop-blur-md p-1 shadow-lg"
               >
                 <button
                   type="button"
@@ -1692,8 +1741,8 @@ export default function App() {
                   }}
                   className={`rounded-lg px-2 py-1 text-[10.5px] font-semibold transition-colors whitespace-nowrap ${
                     todoSubTab === 'da_fare'
-                      ? 'bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] text-white shadow-xs'
-                      : 'text-[#0B4F49] hover:bg-[#E5F9F4]'
+                      ? 'bg-gradient-to-b from-[var(--todo-accent)] to-[var(--todo-accent-dark)] text-white shadow-xs'
+                      : 'text-[var(--todo-text)] hover:bg-[var(--todo-surface-alt)]'
                   }`}
                 >
                   Da Fare
@@ -1703,14 +1752,15 @@ export default function App() {
                   role="menuitem"
                   onClick={() => {
                     setTodoSubTab('organizza');
+                    setOrganizeFocusTodayKey((k) => k + 1);
                     setMobileTab('todo');
                     setDesktopSection('todo');
                     setTodoSubMenuOpen(false);
                   }}
                   className={`rounded-lg px-2 py-1 text-[10.5px] font-semibold transition-colors whitespace-nowrap ${
                     todoSubTab === 'organizza'
-                      ? 'bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] text-white shadow-xs'
-                      : 'text-[#0B4F49] hover:bg-[#E5F9F4]'
+                      ? 'bg-gradient-to-b from-[var(--todo-accent)] to-[var(--todo-accent-dark)] text-white shadow-xs'
+                      : 'text-[var(--todo-text)] hover:bg-[var(--todo-surface-alt)]'
                   }`}
                 >
                   Organizza
@@ -1724,15 +1774,19 @@ export default function App() {
               aria-expanded={todoSubMenuOpen && mobileTab === 'todo'}
               onClick={() => {
                 if (mobileTab !== 'todo') {
+                  setTodoSubTab('organizza');
+                  setOrganizeFocusTodayKey((k) => k + 1);
                   setMobileTab('todo');
                   setDesktopSection('todo');
-                  setTodoSubMenuOpen(true);
+                  setTodoSubMenuOpen(false);
                 } else {
                   setTodoSubMenuOpen((prev) => !prev);
                 }
               }}
               className={`flex w-full flex-col items-center justify-center gap-0.5 px-[3px] sm:px-1.5 transition-colors ${
-                mobileTab === 'todo' ? 'text-[#0F766E] font-semibold' : 'text-[#3A7D76] hover:text-[#083B37]'
+                mobileTab === 'todo'
+                  ? 'text-[var(--todo-accent)] font-semibold'
+                  : 'text-[var(--todo-text-muted)] hover:text-[var(--todo-text)]'
               }`}
             >
               <CheckSquare className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
@@ -1750,7 +1804,9 @@ export default function App() {
               setTodoSubMenuOpen(false);
             }}
             className={`flex flex-auto flex-col items-center justify-center gap-0.5 px-[3px] sm:px-1.5 transition-colors ${
-              mobileTab === 'settings' ? 'text-purple-800 font-semibold' : 'text-stone-500 hover:text-stone-900'
+              mobileTab === 'settings'
+                ? 'text-[var(--app-accent-text)] font-semibold'
+                : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
             }`}
           >
             <Settings className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
@@ -1765,7 +1821,7 @@ export default function App() {
       {toastMessage && (
         <div
           role="status"
-          className="fixed bottom-16 lg:bottom-6 right-4 z-40 rounded-xl bg-stone-900 px-4 py-2.5 text-xs font-medium text-white shadow-lg"
+          className="fixed bottom-16 lg:bottom-6 right-4 z-40 rounded-xl bg-[var(--app-btn-bg)] px-4 py-2.5 text-xs font-medium text-[var(--app-btn-text)] shadow-lg"
         >
           {toastMessage}
         </div>

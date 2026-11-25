@@ -18,6 +18,7 @@ export type TodoSubTab = 'da_fare' | 'organizza';
 
 interface DailyTodoSectionProps {
   subTab: TodoSubTab;
+  focusTodaySignal?: number;
   dailyNotes?: DailyNote[];
   todoItems: TodoNoteItem[];
   organizeItems: OrganizeNoteItem[];
@@ -32,6 +33,7 @@ interface DailyTodoSectionProps {
 
 export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
   subTab,
+  focusTodaySignal,
   dailyNotes = [],
   todoItems,
   organizeItems,
@@ -351,16 +353,27 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
   };
 
   return (
-    <div className="rounded-[26px] border border-[#74C4B6]/90 bg-gradient-to-br from-[#CCF3EC] via-[#E5FAF6] to-[#B7ECE2] p-3 sm:p-4 space-y-3 shadow-sm">
-      {/* Compact Light Aqua-Green Section Title Bar (full-width readable title) */}
+    <div
+      style={{
+        background:
+          'linear-gradient(135deg, var(--todo-shell-from), var(--todo-shell-via), var(--todo-shell-to))',
+      }}
+      className="rounded-[26px] border border-[var(--todo-shell-border)] p-3 sm:p-4 space-y-3 shadow-sm"
+    >
+      {/* Compact Section Title Bar (full-width readable title) */}
       <div className="flex items-center justify-between gap-2 px-1">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="h-7 w-7 rounded-xl bg-gradient-to-br from-[#0E8A7E] to-[#0B5B53] text-white flex items-center justify-center shrink-0 shadow-xs">
+          <div
+            style={{
+              background: 'linear-gradient(135deg, var(--todo-accent), var(--todo-accent-dark))',
+            }}
+            className="h-7 w-7 rounded-xl text-white flex items-center justify-center shrink-0 shadow-xs"
+          >
             <ListChecks className="h-4 w-4" aria-hidden="true" />
           </div>
-          <h2 className="text-sm sm:text-base font-bold text-[#083B37] truncate">
+          <h2 className="text-sm sm:text-base font-bold text-[var(--todo-text)] truncate">
             Da fare giornaliero ·{' '}
-            <span className="text-[#0F6E66]">
+            <span className="text-[var(--todo-text-muted)]">
               {subTab === 'da_fare' ? 'Da Fare' : 'Organizza'}
             </span>
           </h2>
@@ -385,6 +398,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
         />
       ) : (
         <OrganizzaSubsection
+          focusTodaySignal={focusTodaySignal}
           dailyNotes={dailyNotes}
           todoItems={todoItems}
           organizeItems={organizeItems}

@@ -101,10 +101,10 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
   return (
     <article
       ref={menuContainerRef}
-      className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs"
+      className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs transition-colors"
     >
       {/* Daily Note Header */}
-      <div className="flex items-start justify-between gap-3 pb-3 border-b border-stone-100">
+      <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--app-divider)]">
         <div className="flex-1 min-w-0">
           {isEditingTitle && !compact ? (
             <div className="flex items-center gap-2">
@@ -120,13 +120,13 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                   }
                 }}
                 autoFocus
-                className="flex-1 min-h-[38px] rounded-xl border border-purple-400 bg-white px-3 py-1 text-sm font-semibold text-stone-900 focus:outline-none"
+                className="flex-1 min-h-[38px] rounded-xl border border-[var(--app-accent)] bg-[var(--app-card-alt)] px-3 py-1 text-sm font-semibold text-[var(--app-text)] focus:outline-none"
               />
               <button
                 type="button"
                 onClick={handleSaveTitle}
                 aria-label="Salva titolo"
-                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl bg-stone-900 text-white hover:bg-stone-800"
+                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)]"
               >
                 <Check className="h-4 w-4" />
               </button>
@@ -134,7 +134,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
           ) : (
             <div className="flex items-center gap-1.5 min-w-0">
               <h3
-                className={`font-bold text-stone-900 truncate ${
+                className={`font-bold text-[var(--app-text)] truncate ${
                   compact ? 'text-xs' : 'text-base sm:text-lg'
                 }`}
               >
@@ -145,7 +145,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                   type="button"
                   onClick={() => setIsEditingTitle(true)}
                   aria-label="Modifica titolo della giornata"
-                  className="min-h-[32px] min-w-[32px] flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+                  className="min-h-[32px] min-w-[32px] flex items-center justify-center rounded-lg text-[var(--app-text-subtle)] hover:bg-[var(--app-card-alt)] hover:text-[var(--app-text)]"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -155,7 +155,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
 
           {/* Unboxed metadata */}
           <div
-            className={`mt-0.5 flex flex-wrap items-center gap-x-1.5 text-stone-500 ${
+            className={`mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[var(--app-text-subtle)] ${
               compact ? 'text-[11px]' : 'text-xs'
             }`}
           >
@@ -177,7 +177,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                 onClick={() => exportSingleDayNotes(dailyNote, 'excel')}
                 title="Esporta questa giornata in Excel"
                 aria-label="Esporta questa giornata in Excel"
-                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-600 hover:border-purple-300 hover:text-purple-800 transition-colors"
+                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)] hover:text-[var(--app-accent-text)] transition-colors"
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -186,7 +186,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                 onClick={() => exportSingleDayNotes(dailyNote, 'pdf')}
                 title="Esporta questa giornata in PDF"
                 aria-label="Esporta questa giornata in PDF"
-                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-600 hover:border-purple-300 hover:text-purple-800 transition-colors"
+                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)] hover:text-[var(--app-accent-text)] transition-colors"
               >
                 <FileText className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -199,7 +199,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
               disabled={isGeneratingDaily}
               onClick={handleDailySummaryClick}
               title="Aggiorna sintesi della giornata"
-              className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50 transition-colors whitespace-nowrap"
+              className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] px-2.5 py-1.5 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-50 transition-colors whitespace-nowrap"
             >
               {isGeneratingDaily ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -219,8 +219,8 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
               compact ? 'min-h-[36px] min-w-[36px]' : 'min-h-[42px] min-w-[42px]'
             } ${
               dailyNote.pinned
-                ? 'text-purple-800 bg-purple-100/80 hover:bg-purple-200/70'
-                : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700'
+                ? 'text-[var(--app-accent-text)] bg-[var(--app-accent-soft)] hover:opacity-90'
+                : 'text-[var(--app-text-subtle)] hover:bg-[var(--app-card-alt)] hover:text-[var(--app-text)]'
             }`}
           >
             <Pin
@@ -238,12 +238,12 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
         zoomLevel !== 'overview' &&
         dailyNote.dailySummaryBullets &&
         dailyNote.dailySummaryBullets.length > 0 && (
-          <div className="mt-3.5 rounded-2xl border border-purple-200/70 bg-[#FAF7F0] p-3.5">
-            <p className="text-xs font-semibold text-stone-800">Sintesi della giornata</p>
-            <ul className="mt-2 space-y-1 text-xs sm:text-sm text-stone-700">
+          <div className="mt-3.5 rounded-2xl border border-[var(--app-accent-soft-border)] bg-[var(--app-card-alt)] p-3.5">
+            <p className="text-xs font-semibold text-[var(--app-text)]">Sintesi della giornata</p>
+            <ul className="mt-2 space-y-1 text-xs sm:text-sm text-[var(--app-text-muted)]">
               {dailyNote.dailySummaryBullets.map((b, idx) => (
                 <li key={idx} className="flex items-start gap-2">
-                  <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-purple-500 shrink-0" aria-hidden="true" />
+                  <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[var(--app-accent)] shrink-0" aria-hidden="true" />
                   <span>{b}</span>
                 </li>
               ))}
@@ -256,7 +256,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
         <div className="mt-4 space-y-3">
           {/* Chronological Color Ribbon of the Whole Day */}
           <div
-            className="flex h-3 w-full overflow-hidden rounded-full bg-stone-100 gap-0.5 p-0.5"
+            className="flex h-3 w-full overflow-hidden rounded-full bg-[var(--app-card-alt)] gap-0.5 p-0.5"
             aria-label="Sequenza oraria dei colori della giornata"
           >
             {visibleEntries.map((entry) => {
@@ -283,12 +283,12 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                   id={!compact ? `entry-${entry.id}` : undefined}
                   type="button"
                   onClick={() => onSelectEntry(dailyNote, entry)}
-                  className={`w-full flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-all active:scale-[0.99] hover:border-stone-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 ${
+                  className={`w-full flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-all active:scale-[0.99] hover:border-[var(--app-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] ${
                     colMeta.highlightClass
                   } ${
                     isHighlighted
-                      ? 'border-purple-600 ring-2 ring-purple-500 shadow-sm'
-                      : 'border-stone-200/70'
+                      ? 'border-[var(--app-accent)] ring-2 ring-[var(--app-accent)] shadow-sm'
+                      : 'border-[var(--app-border)]'
                   }`}
                 >
                   <span className="font-mono text-sm font-bold tabular-nums">
@@ -319,7 +319,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                 id={!compact ? `entry-${entry.id}` : undefined}
                 className={`relative space-y-2 transition-all ${
                   isHighlighted
-                    ? 'rounded-2xl ring-2 ring-purple-500 bg-purple-50/45 p-2.5 -mx-2.5'
+                    ? 'rounded-2xl ring-2 ring-[var(--app-accent)] bg-[var(--app-accent-soft)] p-2.5 -mx-2.5'
                     : ''
                 }`}
               >
@@ -328,28 +328,28 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                   <button
                     type="button"
                     onClick={() => onSelectEntry(dailyNote, entry)}
-                    className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 rounded-md"
+                    className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] rounded-md"
                   >
                     <span
-                      className={`font-mono font-semibold text-stone-900 tabular-nums ${
+                      className={`font-mono font-semibold text-[var(--app-text)] tabular-nums ${
                         compact ? 'text-[11px]' : 'text-xs'
                       }`}
                     >
                       {entry.time}
                     </span>
-                    <span aria-hidden="true" className="text-stone-300">·</span>
-                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-stone-700">
+                    <span aria-hidden="true" className="text-[var(--app-text-subtle)]">·</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--app-text-muted)]">
                       <span className={`h-2 w-2 rounded-full ${colMeta.dotClass}`} aria-hidden="true" />
                       {colMeta.label}
                     </span>
                     {!compact && entry.audioMetadata && (
                       <>
-                        <span aria-hidden="true" className="text-stone-300">·</span>
-                        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-stone-500 tabular-nums">
-                          <Mic className="h-3 w-3 text-stone-400" aria-hidden="true" />
+                        <span aria-hidden="true" className="text-[var(--app-text-subtle)]">·</span>
+                        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[var(--app-text-subtle)] tabular-nums">
+                          <Mic className="h-3 w-3 text-[var(--app-text-subtle)]" aria-hidden="true" />
                           {formatDuration(entry.audioMetadata.durationSeconds)}
                           {entry.audioMetadata.sizeBytes > 0 && (
-                            <span className="text-stone-400">
+                            <span className="text-[var(--app-text-subtle)]">
                               (
                               {entry.audioMetadata.sizeBytes >= 1024 * 1024
                                 ? `${(entry.audioMetadata.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
@@ -372,7 +372,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                         }}
                         aria-label="Scegli colore evidenziatore per questo appunto"
                         aria-expanded={isMenuOpen}
-                        className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700 transition-colors"
+                        className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg text-[var(--app-text-subtle)] hover:bg-[var(--app-card-alt)] hover:text-[var(--app-text)] transition-colors"
                       >
                         <Highlighter className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -381,9 +381,9 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                         <div
                           role="menu"
                           aria-label="Evidenzia testo appunto"
-                          className="absolute right-0 top-full mt-1 z-30 w-48 rounded-2xl border border-stone-200 bg-white p-2 shadow-lg"
+                          className="absolute right-0 top-full mt-1 z-30 w-48 rounded-2xl border border-[var(--app-border-soft)] bg-[var(--app-card)] p-2 shadow-lg"
                         >
-                          <p className="px-2 py-1 text-[11px] font-medium text-stone-500">
+                          <p className="px-2 py-1 text-[11px] font-medium text-[var(--app-text-subtle)]">
                             Cambia colore
                           </p>
                           <div className="mt-1 grid grid-cols-1 gap-1">
@@ -402,8 +402,8 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                                   }}
                                   className={`flex min-h-[34px] items-center gap-2 rounded-xl px-2.5 py-1 text-xs font-medium transition-colors ${
                                     selected
-                                      ? 'bg-stone-900 text-white'
-                                      : 'text-stone-700 hover:bg-stone-100'
+                                      ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                                      : 'text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]'
                                   }`}
                                 >
                                   <span
@@ -425,7 +425,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                 <button
                   type="button"
                   onClick={() => onSelectEntry(dailyNote, entry)}
-                  className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 rounded-xl"
+                  className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-accent)] rounded-xl"
                 >
                   {zoomLevel === 'sensations' && !compact ? (
                     <div
@@ -464,11 +464,11 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
 
                   {/* Mood / Stress / Sensations Bullet Synthesis for this Entry */}
                   {!compact && entry.bullets && entry.bullets.length > 0 && (
-                    <ul className="mt-2 space-y-1 pl-1 text-xs text-stone-600">
+                    <ul className="mt-2 space-y-1 pl-1 text-xs text-[var(--app-text-muted)]">
                       {entry.bullets.map((bullet, bIdx) => (
                         <li key={bIdx} className="flex items-start gap-2">
                           <span
-                            className="mt-1.5 h-1.5 w-1.5 rounded-full bg-purple-400 shrink-0"
+                            className="mt-1.5 h-1.5 w-1.5 rounded-full bg-[var(--app-accent)] shrink-0"
                             aria-hidden="true"
                           />
                           <span>{bullet}</span>

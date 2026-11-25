@@ -71,6 +71,7 @@ export const SECTION_BLOCKS: Record<LayoutSectionKey, SectionBlockDefinition[]> 
     { id: 'org_export', label: 'Esporta & Stampa Giornata / Settimana' },
   ],
   settings: [
+    { id: 'settings_theme', label: 'Tema scuro / chiaro & Colori separati' },
     { id: 'settings_local_backup', label: 'Download, iCloud / File & Upload JSON' },
     { id: 'settings_preferences', label: 'Preferenze, Layout & Quota AI' },
   ],

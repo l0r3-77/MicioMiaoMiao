@@ -31,36 +31,36 @@ export const TODO_BLOCKS: TodoBlockMeta[] = [
     blockId: 'todo_poi',
     title: 'Poi',
     subtitle: '',
-    cardSurfaceClass: 'bg-[#F7FEFC]/95 border-[#7ECBBF]/85',
-    headerAccentClass: 'text-[#083B37]',
-    badgeClass: 'bg-[#D8F4EE] text-[#0B534D] border-[#7ECBBF]/80',
+    cardSurfaceClass: 'bg-[var(--todo-card)] border-[var(--todo-card-border)]',
+    headerAccentClass: 'text-[var(--todo-text)]',
+    badgeClass: 'bg-[var(--todo-accent-soft)] text-[var(--todo-text)] border-[var(--todo-card-border)]',
   },
   {
     key: 'svaghi',
     blockId: 'todo_svaghi',
     title: 'Svaghi',
     subtitle: '',
-    cardSurfaceClass: 'bg-[#F7FEFC]/95 border-[#7ECBBF]/85',
-    headerAccentClass: 'text-[#083B37]',
-    badgeClass: 'bg-[#DCF5EF] text-[#0B534D] border-[#7ECBBF]/80',
+    cardSurfaceClass: 'bg-[var(--todo-card)] border-[var(--todo-card-border)]',
+    headerAccentClass: 'text-[var(--todo-text)]',
+    badgeClass: 'bg-[var(--todo-accent-soft)] text-[var(--todo-text)] border-[var(--todo-card-border)]',
   },
   {
     key: 'bollette',
     blockId: 'todo_bollette',
     title: 'Bollette e pagamenti',
     subtitle: '',
-    cardSurfaceClass: 'bg-[#F7FEFC]/95 border-[#7ECBBF]/85',
-    headerAccentClass: 'text-[#083B37]',
-    badgeClass: 'bg-[#D8F4EE] text-[#0B534D] border-[#7ECBBF]/80',
+    cardSurfaceClass: 'bg-[var(--todo-card)] border-[var(--todo-card-border)]',
+    headerAccentClass: 'text-[var(--todo-text)]',
+    badgeClass: 'bg-[var(--todo-accent-soft)] text-[var(--todo-text)] border-[var(--todo-card-border)]',
   },
   {
     key: 'poi_poi',
     blockId: 'todo_poi_poi',
     title: 'Poi poi',
     subtitle: '',
-    cardSurfaceClass: 'bg-[#F7FEFC]/95 border-[#7ECBBF]/85',
-    headerAccentClass: 'text-[#083B37]',
-    badgeClass: 'bg-[#D8F4EE] text-[#0F635B] border-[#7ECBBF]/80',
+    cardSurfaceClass: 'bg-[var(--todo-card)] border-[var(--todo-card-border)]',
+    headerAccentClass: 'text-[var(--todo-text)]',
+    badgeClass: 'bg-[var(--todo-accent-soft)] text-[var(--todo-text)] border-[var(--todo-card-border)]',
   },
 ];
 
@@ -120,6 +120,36 @@ export function inferTaskEmoji(text: string, blockHint?: TodoBlockKey): string {
   return inferCatEmoticonId(text, blockHint);
 }
 
+export function buildGoogleCalendarUrl(params: {
+  title: string;
+  details?: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:MM
+}): string {
+  const [y, m, d] = params.date.split('-').map(Number);
+  const [hh, mm] = params.time.split(':').map(Number);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const startDt = new Date(y || 2026, Math.max(0, (m || 1) - 1), d || 1, hh || 0, mm || 0, 0);
+  const endDt = new Date(startDt.getTime() + 60 * 60 * 1000);
+  const fmt = (dt: Date) =>
+    `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(
+      dt.getMinutes()
+    )}00`;
+
+  const url = new URL('https://calendar.google.com/calendar/render');
+  url.searchParams.set('action', 'TEMPLATE');
+  url.searchParams.set('text', params.title.trim() || 'Promemoria MicioMiao');
+  url.searchParams.set('dates', `${fmt(startDt)}/${fmt(endDt)}`);
+  const fullDetails =
+    params.details && params.details.trim()
+      ? params.details.trim()
+      : params.title.trim();
+  if (fullDetails) {
+    url.searchParams.set('details', fullDetails);
+  }
+  return url.toString();
+}
+
 export function sanitizeTodoItems(raw: unknown): TodoNoteItem[] {
   if (!Array.isArray(raw)) return [];
   const nowIso = new Date().toISOString();
@@ -128,6 +158,14 @@ export function sanitizeTodoItems(raw: unknown): TodoNoteItem[] {
     .map((item, idx) => {
       const text = typeof item.text === 'string' ? item.text : '';
       const block = sanitizeTodoBlockKey(item.block);
+      const reminderDate =
+        typeof item.reminderDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.reminderDate)
+          ? item.reminderDate
+          : undefined;
+      const reminderTime =
+        typeof item.reminderTime === 'string' && /^\d{2}:\d{2}$/.test(item.reminderTime)
+          ? item.reminderTime
+          : undefined;
       return {
         id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : crypto.randomUUID(),
         block,
@@ -141,6 +179,8 @@ export function sanitizeTodoItems(raw: unknown): TodoNoteItem[] {
         done: Boolean(item.done),
         order: typeof item.order === 'number' && Number.isFinite(item.order) ? item.order : idx,
         source: (item.source === 'voice' ? 'voice' : 'text') as 'voice' | 'text',
+        ...(reminderDate ? { reminderDate } : {}),
+        ...(reminderTime ? { reminderTime } : {}),
         createdAt: typeof item.createdAt === 'string' ? item.createdAt : nowIso,
         updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : nowIso,
       };

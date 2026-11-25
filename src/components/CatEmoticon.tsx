@@ -836,9 +836,9 @@ export const CatEmoticonPicker: React.FC<CatEmoticonPickerProps> = ({
   variant = 'medallion',
 }) => {
   return (
-    <div className="rounded-xl border border-[#7ECBBF]/90 bg-[#EDFBF8]/95 p-2 space-y-1.5">
+    <div className="rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] p-2 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10.5px] font-bold text-[#083B37]">
+        <span className="text-[10.5px] font-bold text-[var(--todo-text)]">
           Icona gatto ({CAT_EMOTICON_MAP[value].label})
         </span>
         {onResetAuto && (
@@ -847,8 +847,8 @@ export const CatEmoticonPicker: React.FC<CatEmoticonPickerProps> = ({
             onClick={onResetAuto}
             className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition-colors ${
               isAuto
-                ? 'border-[#0F766E] bg-[#0F766E] text-white'
-                : 'border-[#7ECBBF] bg-[#F7FEFC] text-[#083B37] hover:bg-[#D8F4EE]'
+                ? 'border-[var(--todo-accent)] bg-[var(--todo-accent)] text-white'
+                : 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
             }`}
           >
             Auto
@@ -869,8 +869,8 @@ export const CatEmoticonPicker: React.FC<CatEmoticonPickerProps> = ({
               onClick={() => onSelect(cat.id)}
               className={`flex h-9 items-center justify-center rounded-lg border transition-all ${
                 active
-                  ? 'border-[#0F766E] bg-[#C4EFE6] ring-1 ring-[#0F766E] scale-[1.03]'
-                  : 'border-[#9BDCD1] bg-[#F7FEFC] hover:border-[#0E8A7E] hover:bg-[#D8F4EE]'
+                  ? 'border-[var(--todo-accent)] bg-[var(--todo-accent-soft)] ring-1 ring-[var(--todo-accent)] scale-[1.03]'
+                  : 'border-[var(--todo-note-border)] bg-[var(--todo-card)] hover:border-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)]'
               }`}
             >
               <CatEmoticonIcon

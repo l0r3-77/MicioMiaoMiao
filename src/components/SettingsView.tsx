@@ -5,15 +5,23 @@ import {
   Download,
   FileCheck2,
   HardDrive,
+  Monitor,
+  Moon,
+  Palette,
   RotateCcw,
   Settings,
   Share2,
   Sliders,
+  Sun,
   Upload,
 } from 'lucide-react';
 import type { OrganizeNoteItem, TodoNoteItem } from '../types/dailyTodo';
 import type { DailyNote } from '../types/note';
-import type { AppSettings } from '../utils/appSettings';
+import type { AppSettings, ThemeMode } from '../utils/appSettings';
+import {
+  APP_COLOR_PRESET_OPTIONS,
+  TODO_COLOR_PRESET_OPTIONS,
+} from '../utils/themeSystem';
 import {
   BACKUP_FILENAME,
   buildBackupPayload,
@@ -221,18 +229,168 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const blocks: CustomizableBlockItem[] = [
     {
+      id: 'settings_theme',
+      render: () => (
+        <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-2xl bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] flex items-center justify-center shrink-0">
+              <Palette className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-[var(--app-text)]">
+                Aspetto, Tema &amp; Colori
+              </h3>
+              <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
+                Scegli chiaro, scuro o automatico e personalizza i colori delle due aree dell’app.
+              </p>
+            </div>
+          </div>
+
+          {/* 3-way Theme Mode Selector */}
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold text-[var(--app-text)]">Modalità schermo</p>
+            <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
+              {(
+                [
+                  { id: 'light', label: 'Chiaro', Icon: Sun },
+                  { id: 'dark', label: 'Scuro', Icon: Moon },
+                  { id: 'auto', label: 'Automatico', Icon: Monitor },
+                ] as ReadonlyArray<{ id: ThemeMode; label: string; Icon: React.FC<{ className?: string }> }>
+              ).map(({ id, label, Icon }) => {
+                const active = settings.themeMode === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onUpdateSettings({ themeMode: id })}
+                    className={`min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold transition-colors whitespace-nowrap ${
+                      active
+                        ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                        : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Rest of App Color Customization */}
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-bold text-[var(--app-text)]">Colore «Resto dell’app»</p>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-[var(--app-text-muted)]">
+                <span>Personalizzato</span>
+                <input
+                  type="color"
+                  value={settings.appCustomColor}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      appColorPreset: 'custom',
+                      appCustomColor: e.target.value,
+                    })
+                  }
+                  aria-label="Scegli colore personalizzato per il resto dell'app"
+                  className="h-7 w-9 cursor-pointer rounded-md border border-[var(--app-border)] bg-transparent p-0.5"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {APP_COLOR_PRESET_OPTIONS.map((opt) => {
+                const active = settings.appColorPreset === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onUpdateSettings({ appColorPreset: opt.id })}
+                    className={`min-h-[32px] inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      active
+                        ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                        : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                    }`}
+                  >
+                    <span
+                      className="h-3 w-3 rounded-full border border-black/15 shrink-0"
+                      style={{ backgroundColor: opt.swatch }}
+                      aria-hidden="true"
+                    />
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Da Fare Giornaliero Color Customization */}
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-bold text-[var(--app-text)]">
+                Colore «Da fare giornaliero»
+              </p>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-[var(--app-text-muted)]">
+                <span>Personalizzato</span>
+                <input
+                  type="color"
+                  value={settings.todoCustomColor}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      todoColorPreset: 'custom',
+                      todoCustomColor: e.target.value,
+                    })
+                  }
+                  aria-label="Scegli colore personalizzato per Da fare giornaliero"
+                  className="h-7 w-9 cursor-pointer rounded-md border border-[var(--app-border)] bg-transparent p-0.5"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              {TODO_COLOR_PRESET_OPTIONS.map((opt) => {
+                const active = settings.todoColorPreset === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onUpdateSettings({ todoColorPreset: opt.id })}
+                    className={`min-h-[32px] inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      active
+                        ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                        : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                    }`}
+                  >
+                    <span
+                      className="h-3 w-3 rounded-full border border-black/15 shrink-0"
+                      style={{ backgroundColor: opt.swatch }}
+                      aria-hidden="true"
+                    />
+                    <span>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      ),
+    },
+    {
       id: 'settings_local_backup',
       render: () => (
-        <section className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs space-y-4">
+        <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs space-y-4">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-purple-100 text-purple-800 flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-2xl bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] flex items-center justify-center shrink-0">
               <HardDrive className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-stone-900">
+              <h3 className="text-sm sm:text-base font-bold text-[var(--app-text)]">
                 Backup JSON &amp; Salva su File
               </h3>
-              <p className="text-xs text-stone-500 mt-0.5">
+              <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
                 Esporta o importa tutto in <span className="font-mono">{BACKUP_FILENAME}</span> (
                 {dailyNotes.length} giornate · {totalEntriesCount} appunti · {todoItems.length} Da
                 Fare · {organizeItems.length} Organizza, layout e preferenze).
@@ -245,9 +403,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="button"
               disabled={localActionLoading}
               onClick={handleDownloadJsonBackup}
-              className="min-h-[48px] inline-flex items-center justify-center gap-2 rounded-2xl bg-stone-900 px-4 py-3 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50 transition-colors"
+              className="min-h-[48px] inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--app-btn-bg)] px-4 py-3 text-xs font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] disabled:opacity-50 transition-colors"
             >
-              <Download className="h-4 w-4 text-purple-300" aria-hidden="true" />
+              <Download className="h-4 w-4 opacity-85" aria-hidden="true" />
               <span>Download Backup (JSON)</span>
             </button>
 
@@ -255,9 +413,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="button"
               disabled={localActionLoading}
               onClick={() => fileInputRef.current?.click()}
-              className="min-h-[48px] inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-200 bg-white px-4 py-3 text-xs font-semibold text-stone-800 hover:border-purple-400 hover:bg-purple-50/40 disabled:opacity-50 transition-colors"
+              className="min-h-[48px] inline-flex items-center justify-center gap-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-card)] px-4 py-3 text-xs font-semibold text-[var(--app-text)] hover:border-[var(--app-accent-soft-border)] hover:bg-[var(--app-accent-soft)] disabled:opacity-50 transition-colors"
             >
-              <Upload className="h-4 w-4 text-purple-700" aria-hidden="true" />
+              <Upload className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
               <span>Upload Backup (JSON)</span>
             </button>
             <input
@@ -274,19 +432,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               type="button"
               disabled={localActionLoading}
               onClick={handleShareToICloud}
-              className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-purple-200 bg-purple-50/60 px-4 py-2 text-xs font-semibold text-purple-900 hover:bg-purple-100/70 disabled:opacity-50 transition-colors"
+              className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)] px-4 py-2 text-xs font-semibold text-[var(--app-accent-text)] hover:opacity-90 disabled:opacity-50 transition-colors"
             >
               <Share2 className="h-4 w-4" aria-hidden="true" />
               <span>Salva su File / iCloud Drive (iOS)</span>
             </button>
           )}
 
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200/80 bg-[#FAF7F0] px-3.5 py-3">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3.5 py-3">
             <div>
-              <p className="text-xs font-semibold text-stone-900">
+              <p className="text-xs font-semibold text-[var(--app-text)]">
                 Includi clip audio nel backup JSON
               </p>
-              <p className="text-[11px] text-stone-500 mt-0.5">
+              <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
                 Disattivalo se vuoi esportare solo testi, colori, sensazioni e promemoria in un file
                 più leggero.
               </p>
@@ -299,7 +457,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onUpdateSettings({ includeAudioInBackup: !settings.includeAudioInBackup })
               }
               className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
-                settings.includeAudioInBackup ? 'bg-purple-600' : 'bg-stone-300'
+                settings.includeAudioInBackup ? 'bg-[var(--app-accent)]' : 'bg-stone-300 dark:bg-stone-600'
               }`}
             >
               <span className="sr-only">Includi clip audio nel backup</span>
@@ -311,15 +469,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
 
-          <div className="rounded-2xl border border-purple-200/80 bg-purple-50/45 px-3.5 py-3 space-y-2.5">
+          <div className="rounded-2xl border border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)] px-3.5 py-3 space-y-2.5">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs font-bold text-stone-900">
-                  Backup automatico all’apertura e chiusura
+                <p className="text-xs font-bold text-[var(--app-text)]">
+                  Backup automatico ogni 3 aperture (chiusura definitiva)
                 </p>
-                <p className="text-[11px] text-stone-600 mt-0.5 leading-snug">
-                  Scarica automaticamente <span className="font-mono">{BACKUP_FILENAME}</span>{' '}
-                  all’apertura e quando chiudi o lasci l’app.
+                <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-snug">
+                  Scarica automaticamente <span className="font-mono">{BACKUP_FILENAME}</span> ogni
+                  3 aperture dell’app e solo alla chiusura definitiva (escluso quando resta in
+                  background).
                 </p>
               </div>
               <button
@@ -332,10 +491,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   })
                 }
                 className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
-                  settings.autoBackupOnOpenClose ? 'bg-purple-600' : 'bg-stone-300'
+                  settings.autoBackupOnOpenClose ? 'bg-[var(--app-accent)]' : 'bg-stone-300 dark:bg-stone-600'
                 }`}
               >
-                <span className="sr-only">Attiva backup automatico all’apertura e chiusura</span>
+                <span className="sr-only">Attiva backup automatico ogni 3 aperture</span>
                 <span
                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${
                     settings.autoBackupOnOpenClose ? 'translate-x-5' : 'translate-x-0.5'
@@ -345,9 +504,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
 
             {settings.autoBackupOnOpenClose && canPickDirectFile && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-stone-200 bg-white/80 px-3 py-2">
-                <div className="text-[11px] text-stone-700 flex items-center gap-1.5 min-w-0">
-                  <FileCheck2 className="h-3.5 w-3.5 text-purple-700 shrink-0" />
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-3 py-2">
+                <div className="text-[11px] text-[var(--app-text)] flex items-center gap-1.5 min-w-0">
+                  <FileCheck2 className="h-3.5 w-3.5 text-[var(--app-accent-text)] shrink-0" />
                   <span className="truncate">
                     {linkedFileName
                       ? `File collegato: ${linkedFileName}`
@@ -358,7 +517,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <button
                     type="button"
                     onClick={handleLinkLocalAutoFile}
-                    className="min-h-[30px] rounded-lg border border-purple-300 bg-purple-50 px-2.5 py-1 text-[11px] font-semibold text-purple-900 hover:bg-purple-100"
+                    className="min-h-[30px] rounded-lg border border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--app-accent-text)] hover:opacity-90"
                   >
                     {linkedFileName ? 'Cambia' : 'Collega file'}
                   </button>
@@ -369,7 +528,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         await clearLinkedAutoBackupFile();
                         setLinkedFileName(null);
                       }}
-                      className="min-h-[30px] rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-600 hover:bg-stone-100"
+                      className="min-h-[30px] rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2 py-1 text-[11px] font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]"
                     >
                       Scollega
                     </button>
@@ -384,29 +543,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     {
       id: 'settings_preferences',
       render: () => (
-        <section className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs space-y-4">
+        <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs space-y-4">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-purple-100 text-purple-800 flex items-center justify-center shrink-0">
+            <div className="h-10 w-10 rounded-2xl bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] flex items-center justify-center shrink-0">
               <Sliders className="h-5 w-5" aria-hidden="true" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-stone-900">
+              <h3 className="text-sm sm:text-base font-bold text-[var(--app-text)]">
                 Preferenze diario, Promemoria &amp; App
               </h3>
-              <p className="text-xs text-stone-500 mt-0.5">
+              <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
                 Personalizza il comportamento dei promemoria automatici, lo zoom iniziale e i layout.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200/80 px-3.5 py-3">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--app-border)] px-3.5 py-3">
             <div className="flex items-start gap-2.5">
-              <Bell className="h-4 w-4 text-purple-700 mt-0.5 shrink-0" aria-hidden="true" />
+              <Bell className="h-4 w-4 text-[var(--app-accent-text)] mt-0.5 shrink-0" aria-hidden="true" />
               <div>
-                <p className="text-xs font-semibold text-stone-900">
+                <p className="text-xs font-semibold text-[var(--app-text)]">
                   Estrai promemoria automaticamente
                 </p>
-                <p className="text-[11px] text-stone-500 mt-0.5">
+                <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
                   Rileva frasi intere come “potrei fare…”, “forse dovrei…”, “mi sa che se…” in ogni
                   appunto.
                 </p>
@@ -420,7 +579,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 onUpdateSettings({ autoExtractReminders: !settings.autoExtractReminders })
               }
               className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
-                settings.autoExtractReminders ? 'bg-purple-600' : 'bg-stone-300'
+                settings.autoExtractReminders ? 'bg-[var(--app-accent)]' : 'bg-stone-300 dark:bg-stone-600'
               }`}
             >
               <span className="sr-only">Estrai promemoria automaticamente</span>
@@ -432,9 +591,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           </div>
 
-          <div className="rounded-2xl border border-stone-200/80 px-3.5 py-3 space-y-2">
-            <p className="text-xs font-semibold text-stone-900">Zoom predefinito in Agenda</p>
-            <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-purple-50/90 border border-purple-200/70 p-1">
+          <div className="rounded-2xl border border-[var(--app-border)] px-3.5 py-3 space-y-2">
+            <p className="text-xs font-semibold text-[var(--app-text)]">Zoom predefinito in Agenda</p>
+            <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
               {(
                 [
                   { id: 'full', label: 'Tutto' },
@@ -450,8 +609,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onClick={() => onUpdateSettings({ defaultAgendaZoom: z.id })}
                     className={`min-h-[34px] rounded-lg px-2 py-1 text-xs font-semibold transition-colors whitespace-nowrap ${
                       active
-                        ? 'bg-stone-900 text-white shadow-xs'
-                        : 'text-stone-700 hover:text-stone-900'
+                        ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                        : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                     }`}
                   >
                     {z.label}
@@ -461,17 +620,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-stone-200/80 bg-[#FAF7F0] px-3.5 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3.5 py-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold text-stone-900">Ordine &amp; blocchi sezioni</p>
-              <p className="text-[11px] text-stone-500 mt-0.5">
+              <p className="text-xs font-semibold text-[var(--app-text)]">Ordine &amp; blocchi sezioni</p>
+              <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
                 Ripristina l’ordine e la visibilità predefiniti di tutte le schermate.
               </p>
             </div>
             <button
               type="button"
               onClick={onResetAllLayouts}
-              className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-100 transition-colors"
+              className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-3 py-1.5 text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-card-alt)] transition-colors"
             >
               <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
               Ripristina layout
@@ -491,19 +650,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Header Banner */}
-      <section className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
+      <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs flex items-center gap-3.5">
         <CatIllustration
           src={neko.src}
           alt={neko.alt}
-          className="h-14 w-14 rounded-2xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8] shrink-0"
+          className="h-14 w-14 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
         />
         <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-base sm:text-lg font-bold text-stone-900">
-            <Settings className="h-4 w-4 text-purple-700 shrink-0" aria-hidden="true" />
-            Impostazioni &amp; Backup
+          <h2 className="flex items-center gap-2 text-base sm:text-lg font-bold text-[var(--app-text)]">
+            <Settings className="h-4 w-4 text-[var(--app-accent-text)] shrink-0" aria-hidden="true" />
+            Impostazioni, Aspetto &amp; Backup
           </h2>
-          <p className="text-xs text-stone-600 mt-0.5">
-            File JSON / iCloud Drive e preferenze dell’app.
+          <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
+            Tema, colori personalizzati, file JSON / iCloud Drive e preferenze dell’app.
           </p>
         </div>
       </section>
@@ -511,14 +670,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {settingsError && (
         <div
           role="alert"
-          className="rounded-2xl border border-rose-200 bg-rose-50 p-3.5 text-xs text-rose-800 flex items-start gap-2.5"
+          className="rounded-2xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-950/40 p-3.5 text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5"
         >
-          <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" aria-hidden="true" />
+          <AlertCircle className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" aria-hidden="true" />
           <span className="flex-1 leading-relaxed">{settingsError}</span>
           <button
             type="button"
             onClick={() => setSettingsError(null)}
-            className="text-rose-700 font-semibold hover:underline shrink-0"
+            className="text-rose-700 dark:text-rose-300 font-semibold hover:underline shrink-0"
           >
             Chiudi
           </button>
@@ -537,23 +696,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* Explicit Confirmation Modal before Backup Restore */}
       {pendingModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-stone-950/50 backdrop-blur-sm p-0 sm:p-4"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="settings-confirm-title"
           onClick={() => !restoreInProgress && setPendingModal(null)}
         >
           <div
-            className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-white border border-stone-900/10 p-5 shadow-2xl space-y-4 pb-safe"
+            className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-[var(--app-card)] border border-[var(--app-border)] p-5 shadow-2xl space-y-4 pb-safe"
             onClick={(e) => e.stopPropagation()}
           >
             {pendingModal.kind === 'confirm_restore' && (
               <>
                 <div>
-                  <h3 id="settings-confirm-title" className="text-sm font-bold text-stone-900">
+                  <h3 id="settings-confirm-title" className="text-sm font-bold text-[var(--app-text)]">
                     Ripristina backup da {pendingModal.sourceLabel}
                   </h3>
-                  <p className="mt-1 text-xs text-stone-600 leading-relaxed">
+                  <p className="mt-1 text-xs text-[var(--app-text-muted)] leading-relaxed">
                     Il backup contiene{' '}
                     <strong>{pendingModal.payload.dailyNotes.length} giornate</strong>,{' '}
                     <strong>
@@ -579,7 +738,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     type="button"
                     disabled={restoreInProgress}
                     onClick={() => handleConfirmRestore('merge')}
-                    className="w-full min-h-[44px] rounded-xl bg-stone-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50"
+                    className="w-full min-h-[44px] rounded-xl bg-[var(--app-btn-bg)] px-4 py-2.5 text-xs font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] disabled:opacity-50"
                   >
                     {restoreInProgress
                       ? 'Ripristino in corso...'
@@ -589,7 +748,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     type="button"
                     disabled={restoreInProgress}
                     onClick={() => handleConfirmRestore('replace')}
-                    className="w-full min-h-[44px] rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:opacity-50"
+                    className="w-full min-h-[44px] rounded-xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-950/40 px-4 py-2.5 text-xs font-semibold text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-900/50 disabled:opacity-50"
                   >
                     Sostituisci tutti i dati locali con questo backup
                   </button>
@@ -597,7 +756,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     type="button"
                     disabled={restoreInProgress}
                     onClick={() => setPendingModal(null)}
-                    className="w-full min-h-[44px] rounded-xl px-4 py-2 text-xs font-medium text-stone-600 hover:bg-stone-100"
+                    className="w-full min-h-[44px] rounded-xl px-4 py-2 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]"
                   >
                     Annulla
                   </button>

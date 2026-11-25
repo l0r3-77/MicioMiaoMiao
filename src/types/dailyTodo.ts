@@ -15,6 +15,8 @@ export interface TodoNoteItem {
   order: number;
   source: 'voice' | 'text';
   audioMetadata?: AudioMetadata;
+  reminderDate?: string; // YYYY-MM-DD
+  reminderTime?: string; // HH:MM
   createdAt: string;
   updatedAt: string;
 }

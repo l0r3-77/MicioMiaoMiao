@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Calendar,
   CalendarPlus,
   Check,
   CheckCircle2,
@@ -27,7 +28,10 @@ import {
   DAY_PHASES,
   TODO_BLOCK_MAP,
   TODO_BLOCKS,
+  buildGoogleCalendarUrl,
 } from '../utils/dailyTodoStorage';
+import { parseApiJsonSafe } from '../utils/apiError';
+import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import {
   copyTextToClipboard,
   parsePastedLinesSingleRow,
@@ -105,6 +109,8 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   // Note Detail Modal (compact)
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [modalTextDraft, setModalTextDraft] = useState('');
+  const [modalRemDate, setModalRemDate] = useState('');
+  const [modalRemTime, setModalRemTime] = useState('');
   const [showModalCatPicker, setShowModalCatPicker] = useState(false);
   const [modalOrgDate, setModalOrgDate] = useState(() => toISODate(new Date()));
   const [modalOrgPhase, setModalOrgPhase] = useState<DayPhaseKey>('mattina');
@@ -156,6 +162,8 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   useEffect(() => {
     if (selectedTodo) {
       setModalTextDraft(selectedTodo.text);
+      setModalRemDate(selectedTodo.reminderDate || '');
+      setModalRemTime(selectedTodo.reminderTime || '');
       setShowModalCatPicker(false);
     }
   }, [selectedTodo?.id]);
@@ -295,6 +303,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
     if (!rec) return;
 
     setIsTranscribing(true);
+    const stopKeepAlive = startBackgroundSession('Trascrizione nota in corso');
     try {
       const res = await fetch('/api/notes/transcribe-todo', {
         method: 'POST',
@@ -304,13 +313,12 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           mimeType: rec.mimeType,
         }),
       });
-      const raw = await res.text();
-      let data: { text?: string; emoji?: string; quota?: unknown; error?: string } = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = {};
-      }
+      const data = await parseApiJsonSafe<{
+        text?: string;
+        emoji?: string;
+        quota?: unknown;
+        error?: string;
+      }>(res);
       if (data.quota) publishQuotaSnapshot(data.quota);
       if (!res.ok || !data.text?.trim()) {
         setComposerError(
@@ -347,6 +355,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
     } catch {
       setComposerError('Errore di rete durante la trascrizione.');
     } finally {
+      stopKeepAlive();
       setIsTranscribing(false);
     }
   };
@@ -420,13 +429,10 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ rawText: strictLines.join('\n') }),
         });
-        const text = await res.text();
-        const data = text
-          ? (JSON.parse(text) as {
-              items?: Array<{ text?: string; emoji?: string }>;
-              quota?: unknown;
-            })
-          : {};
+        const data = await parseApiJsonSafe<{
+          items?: Array<{ text?: string; emoji?: string }>;
+          quota?: unknown;
+        }>(res);
         if (data.quota) publishQuotaSnapshot(data.quota);
         if (Array.isArray(data.items) && data.items.length === strictLines.length) {
           emojiSuggestions = data.items.map((it) =>
@@ -527,10 +533,10 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           resetDragState();
         }}
         className={`rounded-2xl border p-2.5 sm:p-3 shadow-xs transition-all ${meta.cardSurfaceClass} ${
-          isDropZoneActive ? 'ring-2 ring-[#0E8A7E] scale-[0.995]' : ''
+          isDropZoneActive ? 'ring-2 ring-[var(--todo-accent)] scale-[0.995]' : ''
         }`}
       >
-        <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1.5 border-b border-[#B6E6DD]/85">
+        <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1.5 border-b border-[var(--todo-phase-border)]">
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className={`text-[13px] sm:text-sm font-bold leading-snug ${meta.headerAccentClass}`}>
               {meta.title}
@@ -548,12 +554,12 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               onClick={() => handleCopyBlockNotes(blockKey)}
               aria-label={`Copia note di ${meta.title}`}
               title={`Copia tutte le note di ${meta.title}`}
-              className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] text-[#083B37] hover:bg-[#C7EFE6] hover:border-[#0E8A7E] transition-colors"
+              className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] hover:border-[var(--todo-accent)] transition-colors"
             >
               {copiedBlockKey === blockKey ? (
-                <Check className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+                <Check className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
               ) : (
-                <Copy className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+                <Copy className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
               )}
             </button>
 
@@ -562,16 +568,16 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               onClick={() => handleOpenPasteModal(blockKey)}
               aria-label={`Incolla più note in ${meta.title}`}
               title="Incolla da appunti (1 riga = 1 nota)"
-              className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] text-[#083B37] hover:bg-[#C7EFE6] hover:border-[#0E8A7E] transition-colors"
+              className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] hover:border-[var(--todo-accent)] transition-colors"
             >
-              <ClipboardPaste className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+              <ClipboardPaste className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
             </button>
 
             <button
               type="button"
               onClick={() => focusComposerForBlock(blockKey)}
               aria-label={`Aggiungi nota in ${meta.title}`}
-              className="min-h-[28px] inline-flex items-center gap-1 rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-1.5 py-0.5 text-[10.5px] font-semibold text-[#083B37] hover:bg-[#D8F4EE] transition-colors whitespace-nowrap"
+              className="min-h-[28px] inline-flex items-center gap-1 rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-1.5 py-0.5 text-[10.5px] font-semibold text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] transition-colors whitespace-nowrap"
             >
               <Plus className="h-3 w-3" aria-hidden="true" />
               <span>Aggiungi</span>
@@ -582,7 +588,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
         {/* Ultra-slim Note Strips + Reorder Gaps + Drop-to-Merge Targets */}
         <div className="mt-1.5 space-y-1">
           {items.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[#8AD1C5]/90 bg-[#EDFBF8]/75 px-2.5 py-1.5 text-center text-[11px] text-[#146861]">
+            <div className="rounded-lg border border-dashed border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1.5 text-center text-[11px] text-[var(--todo-text-muted)]">
               Nessuna nota
             </div>
           ) : (
@@ -598,6 +604,10 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   draggedTodoId !== item.id &&
                   dragMergeTargetId === item.id;
                 const catId = resolveCatEmoticonId(item.emoji, item.text, blockKey);
+                const hasReminder = Boolean(item.reminderDate && item.reminderTime);
+                const remShort = hasReminder
+                  ? `${item.reminderDate!.split('-')[2]}/${item.reminderDate!.split('-')[1]} ${item.reminderTime}`
+                  : '';
 
                 return (
                   <React.Fragment key={item.id}>
@@ -626,7 +636,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                       >
                         <div
                           className={`w-full rounded-full transition-all ${
-                            isInsertBefore ? 'h-[3px] bg-[#0E8A7E]' : 'h-[1px] bg-transparent'
+                            isInsertBefore ? 'h-[3px] bg-[var(--todo-accent)]' : 'h-[1px] bg-transparent'
                           }`}
                         />
                       </div>
@@ -663,8 +673,8 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                       onDragEnd={resetDragState}
                       className={`flex items-center gap-1.5 rounded-lg border px-2 py-[6px] min-h-[34px] transition-all ${
                         isMergeTarget
-                          ? 'border-[#0B5B53] bg-[#C4EFE6] ring-2 ring-[#0E8A7E]'
-                          : 'border-[#9BDCD1]/90 bg-gradient-to-b from-[#F7FEFC] to-[#E9FAF6]/90 hover:border-[#0E8A7E]/80'
+                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-2 ring-[var(--todo-accent)]'
+                          : 'border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)]'
                       } ${isDragged ? 'opacity-45' : ''}`}
                     >
                       {/* Ultra-compact Touch + Mouse Drag Handle */}
@@ -682,7 +692,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           pointerDragRef.current = { id: item.id, active: true };
                           setDraggedTodoId(item.id);
                         }}
-                        className="touch-none h-6 w-4.5 flex items-center justify-center rounded cursor-grab active:cursor-grabbing shrink-0 text-[#3D8B83] hover:text-[#083B37]"
+                        className="touch-none h-6 w-4.5 flex items-center justify-center rounded cursor-grab active:cursor-grabbing shrink-0 text-[var(--todo-text-muted)] hover:text-[var(--todo-text)]"
                       >
                         <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -698,12 +708,12 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           });
                         }}
                         aria-label={item.done ? 'Segna come da fare' : 'Segna come completata'}
-                        className="h-5 w-5 flex items-center justify-center rounded shrink-0 text-[#0F766E]"
+                        className="h-5 w-5 flex items-center justify-center rounded shrink-0 text-[var(--todo-accent)]"
                       >
                         {item.done ? (
-                          <CheckCircle2 className="h-4 w-4 text-[#0F766E]" aria-hidden="true" />
+                          <CheckCircle2 className="h-4 w-4 text-[var(--todo-accent)]" aria-hidden="true" />
                         ) : (
-                          <Circle className="h-4 w-4 text-[#68B9AD]" aria-hidden="true" />
+                          <Circle className="h-4 w-4 text-[var(--todo-text-muted)] opacity-60" aria-hidden="true" />
                         )}
                       </button>
 
@@ -721,7 +731,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           sizeClass="h-[22px] w-[22px]"
                         />
                         <span
-                          className={`text-xs font-medium text-[#072C29] leading-[1.2] break-words ${
+                          className={`text-xs font-medium text-[var(--todo-text)] leading-[1.25] break-words ${
                             item.done ? 'line-through opacity-55' : ''
                           }`}
                         >
@@ -729,8 +739,28 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                         </span>
                       </button>
 
+                      {hasReminder && (
+                        <a
+                          href={buildGoogleCalendarUrl({
+                            title: item.text,
+                            details: `${TODO_BLOCK_MAP[blockKey].title}: ${item.text}`,
+                            date: item.reminderDate!,
+                            time: item.reminderTime!,
+                          })}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title={`Aggiungi a Google Calendar (${remShort})`}
+                          aria-label={`Apri Google Calendar per ${item.text}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-[var(--todo-card-border)] bg-[var(--todo-accent-soft)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--todo-text)] hover:opacity-85 shrink-0"
+                        >
+                          <Calendar className="h-3 w-3 text-[var(--todo-accent)]" aria-hidden="true" />
+                          <span className="font-mono tabular-nums">{remShort}</span>
+                        </a>
+                      )}
+
                       {isMergeTarget && (
-                        <span className="rounded bg-[#0B5B53] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
+                        <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
                           Unisci
                         </span>
                       )}
@@ -764,7 +794,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 >
                   <div
                     className={`w-full rounded-full transition-all ${
-                      dragInsertEndBlock === blockKey ? 'h-[3px] bg-[#0E8A7E]' : 'h-[1px] bg-transparent'
+                      dragInsertEndBlock === blockKey ? 'h-[3px] bg-[var(--todo-accent)]' : 'h-[1px] bg-transparent'
                     }`}
                   />
                 </div>
@@ -782,18 +812,18 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       render: () => (
         <section
           ref={composerRef}
-          className="rounded-2xl border border-[#7ECBBF]/85 bg-[#F7FEFC]/95 p-3 shadow-xs space-y-2"
+          className="rounded-2xl border border-[var(--todo-card-border)] bg-[var(--todo-card)] p-3 shadow-xs space-y-2"
         >
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-xs sm:text-sm font-bold text-[#083B37]">Nuova nota</h3>
+            <h3 className="text-xs sm:text-sm font-bold text-[var(--todo-text)]">Nuova nota</h3>
             <button
               type="button"
               onClick={() => setShowComposerCatPicker((v) => !v)}
               aria-expanded={showComposerCatPicker}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
                 showComposerCatPicker
-                  ? 'border-[#0F766E] bg-[#C4EFE6] text-[#083B37]'
-                  : 'border-[#7ECBBF] bg-[#E5F9F4] text-[#0B4F49] hover:bg-[#D4F3EC]'
+                  ? 'border-[var(--todo-accent)] bg-[var(--todo-accent-soft)] text-[var(--todo-text)]'
+                  : 'border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)]'
               }`}
             >
               <CatEmoticonIcon
@@ -835,10 +865,18 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   type="button"
                   onClick={() => setComposerBlock(b.key)}
                   aria-pressed={active}
+                  style={
+                    active
+                      ? {
+                          background:
+                            'linear-gradient(to bottom, var(--todo-accent), var(--todo-accent-dark))',
+                        }
+                      : undefined
+                  }
                   className={`flex-auto min-h-[34px] rounded-lg border px-2.5 py-1 text-[11.5px] sm:text-xs font-semibold transition-colors whitespace-nowrap ${
                     active
-                      ? 'border-[#08443E] bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] text-white shadow-xs'
-                      : 'border-[#7ECBBF] bg-[#E5F9F4] text-[#0B4F49] hover:border-[#0E8A7E]'
+                      ? 'border-[var(--todo-accent-dark)] text-white shadow-xs'
+                      : 'border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text-muted)] hover:border-[var(--todo-accent)]'
                   }`}
                 >
                   {b.title}
@@ -859,7 +897,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   if (composerError) setComposerError(null);
                 }}
                 placeholder={`Scrivi per «${TODO_BLOCK_MAP[composerBlock].title}»...`}
-                className="flex-1 min-h-[36px] rounded-xl border border-[#7ECBBF] bg-[#EDFBF8] px-3 py-1 text-xs text-[#072C29] placeholder:text-[#4F928B] focus:border-[#0E8A7E] focus:bg-[#F7FEFC] focus:outline-none"
+                className="flex-1 min-h-[36px] rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-3 py-1 text-xs text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)] placeholder:opacity-70 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
               />
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
@@ -871,12 +909,12 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                     await startRecording();
                   }}
                   aria-label="Registra e trascrivi nota"
-                  className="min-h-[36px] inline-flex items-center justify-center gap-1 rounded-xl border border-[#7ECBBF] bg-[#E5F9F4] px-2.5 py-1 text-xs font-semibold text-[#0B4F49] hover:bg-[#D4F3EC] disabled:opacity-50 transition-colors"
+                  className="min-h-[36px] inline-flex items-center justify-center gap-1 rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs font-semibold text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] disabled:opacity-50 transition-colors"
                 >
                   {isTranscribing ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                   ) : (
-                    <Mic className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+                    <Mic className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
                   )}
                   <span>{isTranscribing ? 'Trascrivo...' : 'Voce'}</span>
                 </button>
@@ -884,7 +922,11 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 <button
                   type="submit"
                   disabled={isTranscribing}
-                  className="min-h-[36px] inline-flex items-center justify-center gap-1 rounded-xl bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] px-3.5 py-1 text-xs font-semibold text-white hover:from-[#0C786E] hover:to-[#08443E] disabled:opacity-50 transition-colors"
+                  style={{
+                    background:
+                      'linear-gradient(to bottom, var(--todo-accent), var(--todo-accent-dark))',
+                  }}
+                  className="min-h-[36px] inline-flex items-center justify-center gap-1 rounded-xl px-3.5 py-1 text-xs font-semibold text-white disabled:opacity-50 transition-colors"
                 >
                   <Send className="h-3 w-3" aria-hidden="true" />
                   <span>Aggiungi</span>
@@ -892,9 +934,9 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               </div>
             </form>
           ) : (
-            <div className="rounded-xl border border-[#74C4B6] bg-[#062E2B] text-white p-2.5 space-y-2">
+            <div className="rounded-xl border border-[var(--todo-accent)] bg-slate-900 text-white p-2.5 space-y-2">
               <div className="flex items-center justify-between text-xs font-semibold">
-                <span className="text-[#99F6E4]">
+                <span className="text-emerald-200">
                   Trascrizione per «{TODO_BLOCK_MAP[composerBlock].title}»
                 </span>
                 <span className="font-mono tabular-nums">
@@ -906,7 +948,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   <span
                     key={idx}
                     style={{ height: `${Math.round(lvl * 100)}%` }}
-                    className="flex-1 rounded-full bg-[#2DD4BF]/90 transition-all duration-75"
+                    className="flex-1 rounded-full bg-emerald-400/90 transition-all duration-75"
                   />
                 ))}
               </div>
@@ -914,7 +956,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 <button
                   type="button"
                   onClick={handleStopAndSaveVoiceTodo}
-                  className="flex-1 min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#2DD4BF] px-3 py-1 text-xs font-bold text-[#042422] hover:bg-[#5EEAD4]"
+                  className="flex-1 min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-emerald-400 px-3 py-1 text-xs font-bold text-slate-950 hover:bg-emerald-300"
                 >
                   <Square className="h-3 w-3 fill-current" aria-hidden="true" />
                   Trascrivi e aggiungi
@@ -931,7 +973,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           )}
 
           {(composerError || micError) && (
-            <p className="text-[11px] font-medium text-rose-700">{composerError || micError}</p>
+            <p className="text-[11px] font-medium text-rose-700 dark:text-rose-300">{composerError || micError}</p>
           )}
         </section>
       ),
@@ -966,24 +1008,24 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
         className="space-y-2.5"
       />
 
-      {/* Compact Modal: Note Action (No Colors, No Audio Storage, >50% smaller) */}
+      {/* Compact Modal: Note Action + Reminder + Google Calendar */}
       {selectedTodo && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#042422]/45 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="todo-detail-title"
           onClick={() => setSelectedTodoId(null)}
         >
           <div
-            className="w-full max-w-[320px] rounded-2xl bg-[#F7FEFC] border border-[#7ECBBF] p-3.5 shadow-2xl space-y-2.5"
+            className="w-full max-w-[330px] max-h-[90dvh] overflow-y-auto rounded-2xl bg-[var(--todo-card)] border border-[var(--todo-card-border)] p-3.5 shadow-2xl space-y-2.5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => setShowModalCatPicker((v) => !v)}
-                className="flex items-center gap-1.5 min-w-0 rounded-lg border border-[#9BDCD1] bg-[#EDFBF8] px-2 py-1 hover:border-[#0E8A7E] transition-colors"
+                className="flex items-center gap-1.5 min-w-0 rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2 py-1 hover:border-[var(--todo-accent)] transition-colors"
                 title="Cambia emoticon gatto companion"
               >
                 <CatEmoticonIcon
@@ -993,10 +1035,10 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   variant="fullFace"
                   sizeClass="h-5 w-5"
                 />
-                <h3 id="todo-detail-title" className="text-xs font-bold text-[#083B37] leading-tight">
+                <h3 id="todo-detail-title" className="text-xs font-bold text-[var(--todo-text)] leading-tight">
                   {TODO_BLOCK_MAP[selectedTodo.block].title}
                 </h3>
-                <span className="text-[10px] font-semibold text-[#0F766E] shrink-0">
+                <span className="text-[10px] font-semibold text-[var(--todo-accent)] shrink-0">
                   Cambia
                 </span>
               </button>
@@ -1004,7 +1046,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 type="button"
                 onClick={() => setSelectedTodoId(null)}
                 aria-label="Chiudi"
-                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[#9BDCD1] text-[#0B534D] hover:bg-[#D8F4EE] shrink-0"
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[var(--todo-card-border)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)] shrink-0"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1025,13 +1067,13 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               />
             )}
 
-            {/* Edit Text */}
+            {/* Edit Text (Salva updates text + reminder and auto-closes) */}
             <div className="flex gap-1.5">
               <input
                 type="text"
                 value={modalTextDraft}
                 onChange={(e) => setModalTextDraft(e.target.value)}
-                className="flex-1 min-h-[34px] rounded-lg border border-[#7ECBBF] bg-[#EDFBF8] px-2.5 py-1 text-xs text-[#072C29] focus:border-[#0E8A7E] focus:bg-[#F7FEFC] focus:outline-none"
+                className="flex-1 min-h-[34px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)] focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
               />
               <button
                 type="button"
@@ -1040,30 +1082,98 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   if (!clean) return;
                   onUpdateTodo(selectedTodo.id, {
                     text: clean,
+                    reminderDate: modalRemDate || undefined,
+                    reminderTime: modalRemTime || undefined,
                     updatedAt: new Date().toISOString(),
                   });
+                  setSelectedTodoId(null);
                   onNotify('Nota aggiornata');
                 }}
-                className="min-h-[34px] rounded-lg bg-[#0B5B53] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#08443E] shrink-0"
+                className="min-h-[34px] rounded-lg bg-[var(--todo-accent-dark)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90 shrink-0"
               >
                 Salva
               </button>
             </div>
 
+            {/* Reminder Date & Time + Google Calendar Event */}
+            <div className="rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] p-2 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[var(--todo-text)]">
+                  <Calendar className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
+                  Promemoria e Calendario
+                </span>
+                {(modalRemDate || modalRemTime) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalRemDate('');
+                      setModalRemTime('');
+                    }}
+                    className="text-[10px] font-semibold text-[var(--todo-text-muted)] hover:underline"
+                  >
+                    Rimuovi
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <input
+                  type="date"
+                  value={modalRemDate}
+                  onChange={(e) => setModalRemDate(e.target.value)}
+                  aria-label="Data promemoria"
+                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 py-1 text-[var(--todo-text)]"
+                />
+                <input
+                  type="time"
+                  value={modalRemTime}
+                  onChange={(e) => setModalRemTime(e.target.value)}
+                  aria-label="Ora promemoria"
+                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 py-1 text-[var(--todo-text)]"
+                />
+              </div>
+              {modalRemDate && modalRemTime && (
+                <a
+                  href={buildGoogleCalendarUrl({
+                    title: modalTextDraft.trim() || selectedTodo.text,
+                    details: `${TODO_BLOCK_MAP[selectedTodo.block].title}: ${modalTextDraft.trim() || selectedTodo.text}`,
+                    date: modalRemDate,
+                    time: modalRemTime,
+                  })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    const clean = modalTextDraft.trim();
+                    if (clean) {
+                      onUpdateTodo(selectedTodo.id, {
+                        text: clean,
+                        reminderDate: modalRemDate,
+                        reminderTime: modalRemTime,
+                        updatedAt: new Date().toISOString(),
+                      });
+                    }
+                  }}
+                  className="w-full min-h-[32px] inline-flex items-center justify-center gap-1.5 rounded-lg bg-[var(--todo-accent)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90"
+                >
+                  <Calendar className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Apri Google Calendar</span>
+                </a>
+              )}
+            </div>
+
             {/* Order & Move Block */}
-            <div className="rounded-xl border border-[#9BDCD1] bg-[#EDFBF8] p-2 space-y-2">
+            <div className="rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] p-2 space-y-2">
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => onMoveTodoStep(selectedTodo.id, -1)}
-                  className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-2 text-[11px] font-semibold text-[#0B4F49] hover:bg-[#D8F4EE]"
+                  className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 text-[11px] font-semibold text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]"
                 >
                   <ArrowUp className="h-3 w-3" /> Su
                 </button>
                 <button
                   type="button"
                   onClick={() => onMoveTodoStep(selectedTodo.id, 1)}
-                  className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-2 text-[11px] font-semibold text-[#0B4F49] hover:bg-[#D8F4EE]"
+                  className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 text-[11px] font-semibold text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]"
                 >
                   <ArrowDown className="h-3 w-3" /> Giù
                 </button>
@@ -1083,8 +1193,8 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                       }}
                       className={`flex-auto min-h-[28px] rounded-lg border px-2 py-0.5 text-[10.5px] font-semibold whitespace-nowrap transition-colors ${
                         isCurrent
-                          ? 'border-[#08443E] bg-[#0B5B53] text-white'
-                          : 'border-[#7ECBBF] bg-[#F7FEFC] text-[#0B4F49] hover:bg-[#D8F4EE]'
+                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
+                          : 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
                       }`}
                     >
                       {b.title}
@@ -1095,9 +1205,9 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
             </div>
 
             {/* Add / Move to Organizza */}
-            <div className="rounded-xl border border-[#7ECBBF]/80 bg-[#D8F4EE]/75 p-2 space-y-1.5">
-              <div className="flex items-center gap-1 text-[11px] font-bold text-[#083B37]">
-                <CalendarPlus className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+            <div className="rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-accent-soft)] p-2 space-y-1.5">
+              <div className="flex items-center gap-1 text-[11px] font-bold text-[var(--todo-text)]">
+                <CalendarPlus className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
                 <span>Invia in Organizza</span>
               </div>
               <div className="grid grid-cols-1 gap-1.5">
@@ -1105,12 +1215,12 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   type="date"
                   value={modalOrgDate}
                   onChange={(e) => setModalOrgDate(e.target.value)}
-                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-2 py-1 text-[#072C29]"
+                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 py-1 text-[var(--todo-text)]"
                 />
                 <select
                   value={modalOrgPhase}
                   onChange={(e) => setModalOrgPhase(e.target.value as DayPhaseKey)}
-                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-2 py-1 text-[#072C29]"
+                  className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 py-1 text-[var(--todo-text)]"
                 >
                   {DAY_PHASES.map((p) => (
                     <option key={p.key} value={p.key}>
@@ -1126,7 +1236,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                     onSendTodoToOrganize(selectedTodo, modalOrgDate, modalOrgPhase, false);
                     setSelectedTodoId(null);
                   }}
-                  className="min-h-[32px] rounded-lg bg-[#0B5B53] px-2 py-1 text-[10.5px] font-semibold text-white hover:bg-[#08443E]"
+                  className="min-h-[32px] rounded-lg bg-[var(--todo-accent-dark)] px-2 py-1 text-[10.5px] font-semibold text-white hover:opacity-90"
                 >
                   Copia lì
                 </button>
@@ -1136,7 +1246,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                     onSendTodoToOrganize(selectedTodo, modalOrgDate, modalOrgPhase, true);
                     setSelectedTodoId(null);
                   }}
-                  className="min-h-[32px] rounded-lg border border-[#74C4B6] bg-[#F7FEFC] px-2 py-1 text-[10.5px] font-semibold text-[#083B37] hover:bg-[#E5F9F4]"
+                  className="min-h-[32px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 py-1 text-[10.5px] font-semibold text-[var(--todo-text)] hover:bg-[var(--todo-surface)]"
                 >
                   Sposta lì
                 </button>
@@ -1152,14 +1262,14 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   onDeleteTodo(idToDel);
                   onNotify('Nota eliminata');
                 }}
-                className="min-h-[32px] inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                className="min-h-[32px] inline-flex items-center gap-1 rounded-lg border border-rose-200 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:text-rose-200 hover:bg-rose-100"
               >
                 <Trash2 className="h-3 w-3" /> Elimina
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedTodoId(null)}
-                className="min-h-[32px] rounded-lg border border-[#9BDCD1] bg-[#F7FEFC] px-3 py-1 text-[11px] font-semibold text-[#0B534D] hover:bg-[#D8F4EE]"
+                className="min-h-[32px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-3 py-1 text-[11px] font-semibold text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]"
               >
                 Chiudi
               </button>
@@ -1171,7 +1281,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       {/* Compact Modal: Batch Paste from Clipboard (1 line = 1 note, preserves multi-activities on one line) */}
       {pasteBlock && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#042422]/45 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="batch-paste-title"
@@ -1190,11 +1300,11 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           }}
         >
           <div
-            className="w-full max-w-[320px] rounded-2xl bg-[#F7FEFC] border border-[#7ECBBF] p-3.5 shadow-2xl space-y-2.5"
+            className="w-full max-w-[320px] rounded-2xl bg-[var(--todo-card)] border border-[var(--todo-card-border)] p-3.5 shadow-2xl space-y-2.5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2">
-              <h3 id="batch-paste-title" className="text-xs font-bold text-[#083B37] truncate">
+              <h3 id="batch-paste-title" className="text-xs font-bold text-[var(--todo-text)] truncate">
                 Incolla note · {TODO_BLOCK_MAP[pasteBlock].title}
               </h3>
               <button
@@ -1202,7 +1312,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 disabled={isParsingBatch}
                 onClick={() => setPasteBlock(null)}
                 aria-label="Chiudi"
-                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[#9BDCD1] text-[#0B534D] hover:bg-[#D8F4EE] shrink-0"
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[var(--todo-card-border)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)] shrink-0"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1212,7 +1322,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               type="button"
               disabled={isParsingBatch}
               onClick={handlePasteFromClipboard}
-              className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#74C4B6] bg-[#D8F4EE] px-2.5 py-1 text-xs font-semibold text-[#0B4F49] hover:bg-[#BEECE1] disabled:opacity-50"
+              className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--todo-text)] hover:opacity-90 disabled:opacity-50"
             >
               <ClipboardPaste className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Incolla dagli appunti</span>
@@ -1229,17 +1339,21 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   if (pasteError) setPasteError(null);
                 }}
                 placeholder={'Riga 1...\nRiga 2...\nRiga 3...'}
-                className="w-full rounded-xl border border-[#7ECBBF] bg-[#EDFBF8] p-2 text-[#072C29] placeholder:text-[#4F928B] focus:border-[#0E8A7E] focus:bg-[#F7FEFC] focus:outline-none"
+                className="w-full rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] p-2 text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)] placeholder:opacity-70 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
               />
 
               {pasteError && (
-                <p className="text-[11px] font-medium text-rose-700">{pasteError}</p>
+                <p className="text-[11px] font-medium text-rose-700 dark:text-rose-300">{pasteError}</p>
               )}
 
               <button
                 type="submit"
                 disabled={isParsingBatch || !pasteRawText.trim()}
-                className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] px-3 py-1.5 text-xs font-semibold text-white hover:from-[#0C786E] hover:to-[#08443E] disabled:opacity-50"
+                style={{
+                  background:
+                    'linear-gradient(to bottom, var(--todo-accent), var(--todo-accent-dark))',
+                }}
+                className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
               >
                 {isParsingBatch ? (
                   <>
@@ -1257,7 +1371,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
 
       {/* Floating Drag Guidance Pill */}
       {draggedTodoId && (
-        <div className="fixed bottom-16 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none rounded-full bg-[#083B37] px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg border border-[#74C4B6]/60 whitespace-nowrap max-w-[92vw] truncate">
+        <div className="fixed bottom-16 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none rounded-full bg-[var(--todo-accent-dark)] px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg border border-[var(--todo-card-border)] whitespace-nowrap max-w-[92vw] truncate">
           {dragMergeTargetId
             ? `Rilascia per unire con «${todoItems.find((t) => t.id === dragMergeTargetId)?.text || 'nota'}»`
             : dragInsertBeforeId || dragInsertEndBlock

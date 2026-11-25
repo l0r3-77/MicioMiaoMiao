@@ -103,19 +103,19 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
           className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
             isCustomizing
               ? isAqua
-                ? 'border-[#0B5B53] bg-[#0B5B53] text-white'
+                ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
                 : isSlate
                   ? 'border-slate-900 bg-slate-900 text-white'
                   : isTeal
                     ? 'border-teal-900 bg-teal-900 text-white'
-                    : 'border-stone-900 bg-stone-900 text-white'
+                    : 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
               : isAqua
-                ? 'border-[#7ECBBF] bg-[#F7FEFC]/95 text-[#083B37] hover:border-[#0E8A7E] hover:bg-[#D8F4EE]/75'
+                ? 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:border-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)]'
                 : isSlate
                   ? 'border-slate-300 bg-white/95 text-slate-800 hover:border-blue-400 hover:bg-blue-50/60'
                   : isTeal
                     ? 'border-teal-300/90 bg-white/95 text-teal-900 hover:border-teal-500 hover:bg-teal-50/70'
-                    : 'border-stone-200/90 bg-white/90 text-stone-700 hover:border-purple-300 hover:bg-purple-50/50'
+                    : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)] hover:bg-[var(--app-accent-soft)]'
           }`}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
@@ -126,14 +126,14 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
           <button
             type="button"
             onClick={() => onResetSection(section)}
-            className={`inline-flex items-center gap-1 rounded-xl border bg-[#F7FEFC] px-2.5 py-1.5 text-[11px] font-medium hover:bg-stone-50 whitespace-nowrap ${
+            className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium whitespace-nowrap ${
               isAqua
-                ? 'border-[#7ECBBF] text-[#083B37]'
+                ? 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
                 : isSlate
-                  ? 'border-slate-300 text-slate-800'
+                  ? 'border-slate-300 bg-white text-slate-800 hover:bg-stone-50'
                   : isTeal
-                    ? 'border-teal-200 text-teal-900'
-                    : 'border-stone-200 text-stone-600'
+                    ? 'border-teal-200 bg-white text-teal-900 hover:bg-stone-50'
+                    : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]'
             }`}
           >
             <RotateCcw className="h-3 w-3" aria-hidden="true" />
@@ -147,16 +147,20 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
         <div
           className={`rounded-2xl border p-3 space-y-2 ${
             isAqua
-              ? 'border-[#7ECBBF] bg-[#DCF6F0]/90'
+              ? 'border-[var(--todo-card-border)] bg-[var(--todo-surface)]'
               : isSlate
                 ? 'border-slate-300 bg-slate-100/90'
                 : isTeal
                   ? 'border-teal-300/90 bg-teal-100/55'
-                  : 'border-purple-200/90 bg-purple-50/45'
+                  : 'border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)]'
           }`}
         >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold text-stone-800">
+            <p
+              className={`text-[11px] font-semibold ${
+                isAqua ? 'text-[var(--todo-text)]' : 'text-[var(--app-text)]'
+              }`}
+            >
               Trascina i blocchi qui sotto oppure usa le frecce e l’occhio per mostrare o nascondere
             </p>
             {compactToolbar && (
@@ -165,12 +169,12 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
                 onClick={() => onResetSection(section)}
                 className={`text-[11px] font-semibold hover:underline whitespace-nowrap ${
                   isAqua
-                    ? 'text-[#0F766E]'
+                    ? 'text-[var(--todo-accent)]'
                     : isSlate
                       ? 'text-blue-800'
                       : isTeal
                         ? 'text-teal-800'
-                        : 'text-purple-700'
+                        : 'text-[var(--app-accent-text)]'
                 }`}
               >
                 Ripristina
@@ -188,28 +192,30 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
                   onClick={() => toggleVisibility(id)}
                   className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
                     hidden
-                      ? 'border-stone-200 bg-white/60 text-stone-400 line-through'
+                      ? isAqua
+                        ? 'border-[var(--todo-phase-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-text-muted)] line-through opacity-60'
+                        : 'border-[var(--app-border-soft)] bg-[var(--app-card-alt)] text-[var(--app-text-subtle)] line-through opacity-60'
                       : isAqua
-                        ? 'border-[#74C4B6] bg-[#F7FEFC] text-[#083B37]'
+                        ? 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text)]'
                         : isSlate
                           ? 'border-blue-300 bg-white text-slate-900'
                           : isTeal
                             ? 'border-teal-400 bg-white text-teal-950'
-                            : 'border-purple-300 bg-white text-stone-800'
+                            : 'border-[var(--app-accent-soft-border)] bg-[var(--app-card)] text-[var(--app-text)]'
                   }`}
                 >
                   {hidden ? (
-                    <EyeOff className="h-3 w-3 text-stone-400" aria-hidden="true" />
+                    <EyeOff className="h-3 w-3 opacity-60" aria-hidden="true" />
                   ) : (
                     <Eye
                       className={`h-3 w-3 ${
                         isAqua
-                          ? 'text-[#0F766E]'
+                          ? 'text-[var(--todo-accent)]'
                           : isSlate
                             ? 'text-blue-700'
                             : isTeal
                               ? 'text-teal-700'
-                              : 'text-purple-600'
+                              : 'text-[var(--app-accent)]'
                       }`}
                       aria-hidden="true"
                     />
@@ -267,37 +273,41 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
             className={`min-w-0 transition-all ${
               isCustomizing
                 ? isAqua
-                  ? 'rounded-2xl ring-2 ring-dashed ring-[#0E8A7E]/80 p-1.5 bg-[#DCF6F0]/60'
+                  ? 'rounded-2xl ring-2 ring-dashed ring-[var(--todo-accent)] p-1.5 bg-[var(--todo-accent-soft)]'
                   : isSlate
                     ? 'rounded-2xl ring-2 ring-dashed ring-blue-400/80 p-1.5 bg-slate-100/60'
                     : isTeal
                       ? 'rounded-2xl ring-2 ring-dashed ring-teal-400/85 p-1.5 bg-teal-50/35'
-                      : 'rounded-2xl ring-2 ring-dashed ring-purple-300/80 p-1.5 bg-purple-50/20'
+                      : 'rounded-2xl ring-2 ring-dashed ring-[var(--app-accent-soft-border)] p-1.5 bg-[var(--app-accent-soft)]'
                 : ''
             } ${isDragged ? 'opacity-50' : ''} ${
               isDropTarget
                 ? isAqua
-                  ? 'ring-[#0B5B53] bg-[#B4ECE0]/55 scale-[0.99]'
+                  ? 'ring-[var(--todo-accent-dark)] bg-[var(--todo-surface-alt)] scale-[0.99]'
                   : isSlate
                     ? 'ring-blue-700 bg-blue-100/50 scale-[0.99]'
                     : isTeal
                       ? 'ring-teal-700 bg-teal-100/50 scale-[0.99]'
-                      : 'ring-purple-600 bg-purple-100/40 scale-[0.99]'
+                      : 'ring-[var(--app-accent)] bg-[var(--app-accent-soft)] scale-[0.99]'
                 : ''
             }`}
           >
             {isCustomizing && (
               <div className="mb-1.5 flex items-center justify-between gap-2 px-1.5 py-0.5 text-[11px]">
-                <div className="flex items-center gap-1.5 font-semibold text-stone-700 cursor-grab active:cursor-grabbing min-w-0">
+                <div
+                  className={`flex items-center gap-1.5 font-semibold cursor-grab active:cursor-grabbing min-w-0 ${
+                    isAqua ? 'text-[var(--todo-text)]' : 'text-[var(--app-text)]'
+                  }`}
+                >
                   <GripVertical
                     className={`h-4 w-4 shrink-0 ${
                       isAqua
-                        ? 'text-[#0F766E]'
+                        ? 'text-[var(--todo-accent)]'
                         : isSlate
                           ? 'text-blue-700'
                           : isAltTheme
                             ? 'text-teal-700'
-                            : 'text-purple-600'
+                            : 'text-[var(--app-accent)]'
                     }`}
                     aria-hidden="true"
                   />
@@ -309,7 +319,11 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
                     disabled={index === 0}
                     onClick={() => moveBlock(id, -1)}
                     aria-label={`Sposta su ${label}`}
-                    className="min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-700 hover:bg-stone-100 disabled:opacity-35"
+                    className={`min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg border disabled:opacity-35 ${
+                      isAqua
+                        ? 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
+                        : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]'
+                    }`}
                   >
                     <ArrowUp className="h-3.5 w-3.5" />
                   </button>
@@ -318,7 +332,11 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
                     disabled={index === orderedIds.length - 1}
                     onClick={() => moveBlock(id, 1)}
                     aria-label={`Sposta giù ${label}`}
-                    className="min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-700 hover:bg-stone-100 disabled:opacity-35"
+                    className={`min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg border disabled:opacity-35 ${
+                      isAqua
+                        ? 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
+                        : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]'
+                    }`}
                   >
                     <ArrowDown className="h-3.5 w-3.5" />
                   </button>
@@ -326,7 +344,11 @@ export const CustomizableSectionStack: React.FC<CustomizableSectionStackProps> =
                     type="button"
                     onClick={() => toggleVisibility(id)}
                     aria-label={`Nascondi ${label}`}
-                    className="min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-600 hover:bg-rose-50 hover:text-rose-700"
+                    className={`min-h-[30px] min-w-[30px] flex items-center justify-center rounded-lg border hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 ${
+                      isAqua
+                        ? 'border-[var(--todo-card-border)] bg-[var(--todo-card)] text-[var(--todo-text-muted)]'
+                        : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)]'
+                    }`}
                   >
                     <EyeOff className="h-3.5 w-3.5" />
                   </button>

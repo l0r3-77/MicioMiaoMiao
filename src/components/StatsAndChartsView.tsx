@@ -781,17 +781,17 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     {
       id: 'stats_export',
       render: () => (
-        <section className="rounded-3xl border border-purple-200/80 bg-white p-4 sm:p-5 shadow-xs">
+        <section className="rounded-3xl border border-[var(--app-accent-soft-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="h-9 w-9 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center shrink-0">
+              <div className="h-9 w-9 rounded-xl bg-[var(--app-accent-soft)] text-[var(--app-accent-text)] flex items-center justify-center shrink-0">
                 <Download className="h-4 w-4" aria-hidden="true" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-stone-900">
+                <h3 className="text-sm font-bold text-[var(--app-text)]">
                   Esporta Grafici, Statistiche o Note
                 </h3>
-                <p className="text-[11px] text-stone-500">
+                <p className="text-[11px] text-[var(--app-text-muted)]">
                   Scarica subito in formato Excel (.xlsx) o PDF per il periodo: {dateRange.label}
                 </p>
               </div>
@@ -820,29 +820,29 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             ).map((item) => (
               <div
                 key={item.scope}
-                className="rounded-2xl border border-stone-200/80 bg-[#FAF7F0] p-3 flex flex-col justify-between gap-2.5"
+                className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 flex flex-col justify-between gap-2.5"
               >
                 <div>
-                  <p className="text-xs font-bold text-stone-900">{item.title}</p>
-                  <p className="text-[11px] text-stone-500">{item.desc}</p>
+                  <p className="text-xs font-bold text-[var(--app-text)]">{item.title}</p>
+                  <p className="text-[11px] text-[var(--app-text-muted)]">{item.desc}</p>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     disabled={exportingState !== null}
                     onClick={() => handleRunExport('excel', item.scope)}
-                    className="flex-1 min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-800 hover:border-purple-300 hover:bg-purple-50/40 disabled:opacity-50 transition-colors"
+                    className="flex-1 min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1.5 text-xs font-semibold text-[var(--app-text)] hover:border-[var(--app-accent-soft-border)] hover:bg-[var(--app-accent-soft)] disabled:opacity-50 transition-colors"
                   >
-                    <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700" aria-hidden="true" />
+                    <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
                     <span>Excel</span>
                   </button>
                   <button
                     type="button"
                     disabled={exportingState !== null}
                     onClick={() => handleRunExport('pdf', item.scope)}
-                    className="flex-1 min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-stone-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-50 transition-colors"
+                    className="flex-1 min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-[var(--app-btn-bg)] px-2.5 py-1.5 text-xs font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] disabled:opacity-50 transition-colors"
                   >
-                    <FileText className="h-3.5 w-3.5 text-purple-300" aria-hidden="true" />
+                    <FileText className="h-3.5 w-3.5 opacity-85" aria-hidden="true" />
                     <span>PDF</span>
                   </button>
                 </div>
@@ -857,22 +857,22 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       render: () => (
         <section
           ref={timelineChartRef}
-          className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs"
+          className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="flex items-center gap-2 text-sm font-bold text-stone-900">
-                <TrendingUp className="h-4 w-4 text-purple-700" aria-hidden="true" />
+              <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--app-text)]">
+                <TrendingUp className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
                 Andamento nel periodo ({dateRange.label})
               </h3>
-              <p className="text-xs text-stone-500 mt-0.5">
+              <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
                 {prefs.timelineChartType === 'line'
                   ? 'Scala valenza: +2 Contento · +1 Abbastanza bene · 0 Normale · -1 Male · -2 Malissimo'
                   : 'Tocca un giorno sul grafico per aprire i dettagli'}
               </p>
             </div>
 
-            <div className="inline-flex items-center gap-1 rounded-xl bg-purple-50/90 border border-purple-200/70 p-1">
+            <div className="inline-flex items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
               {(
                 [
                   { id: 'bars', label: 'Barre colori' },
@@ -886,8 +886,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   onClick={() => updatePref('timelineChartType', mode.id)}
                   className={`min-h-[30px] rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap ${
                     prefs.timelineChartType === mode.id
-                      ? 'bg-stone-900 text-white shadow-xs'
-                      : 'text-stone-700 hover:text-stone-900'
+                      ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                      : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                   }`}
                 >
                   {mode.label}
@@ -897,8 +897,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           </div>
 
           {activeBucket && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-stone-600">
-              <span className="font-mono font-semibold text-stone-900">
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--app-text-muted)]">
+              <span className="font-mono font-semibold text-[var(--app-text)]">
                 {activeBucket.shortLabel}
               </span>
               <span aria-hidden="true">·</span>
@@ -920,7 +920,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onSelectDateAndOpenAgenda(activeBucket.date)}
-                    className="font-semibold text-purple-700 hover:underline"
+                    className="font-semibold text-[var(--app-accent-text)] hover:underline"
                   >
                     Apri giorno
                   </button>
@@ -932,7 +932,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           {prefs.timelineChartType === 'line' ? (
             <div className="mt-4">
               {lineChartGeometry.points.length === 0 ? (
-                <p className="py-8 text-center text-xs text-stone-500">
+                <p className="py-8 text-center text-xs text-[var(--app-text-muted)]">
                   Servono appunti nel periodo per tracciare la linea emotiva.
                 </p>
               ) : (
@@ -966,7 +966,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                           y1={ref.y}
                           x2="572"
                           y2={ref.y}
-                          stroke="#E7E5E4"
+                          stroke="var(--app-divider)"
                           strokeDasharray="3 3"
                         />
                         <text
@@ -987,7 +987,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     {lineChartGeometry.points.length > 1 && (
                       <polyline
                         fill="none"
-                        stroke="#292524"
+                        stroke="var(--app-text)"
                         strokeWidth="2.2"
                         strokeLinejoin="round"
                         strokeLinecap="round"
@@ -1007,7 +1007,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                             cy={pt.y}
                             r={isSelected ? 6.5 : 4.5}
                             fill={pt.color}
-                            stroke="#FFFFFF"
+                            stroke="var(--app-card)"
                             strokeWidth="2"
                           />
                           <title>
@@ -1037,16 +1037,16 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       onClick={() => setSelectedTimelineKey(bucket.date)}
                       aria-label={`${bucket.shortLabel}: ${bucket.total} appunti`}
                       className={`group flex flex-col items-center justify-end gap-1.5 min-w-[26px] flex-1 h-[140px] rounded-lg px-0.5 py-1 transition-colors ${
-                        isSelected ? 'bg-purple-50' : 'hover:bg-stone-50'
+                        isSelected ? 'bg-[var(--app-accent-soft)]' : 'hover:bg-[var(--app-card-alt)]'
                       }`}
                     >
                       <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end">
                         {bucket.total === 0 ? (
-                          <div className="w-full h-1 rounded-full bg-stone-200/70" />
+                          <div className="w-full h-1 rounded-full bg-[var(--app-divider)]" />
                         ) : prefs.timelineChartType === 'valence' ? (
                           <div
                             style={{ height: `${heightPct}%` }}
-                            className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-stone-200/60"
+                            className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-[var(--app-border)]"
                           >
                             {bucket.negCount > 0 && (
                               <div
@@ -1085,7 +1085,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                         ) : (
                           <div
                             style={{ height: `${heightPct}%` }}
-                            className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-stone-200/60"
+                            className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-[var(--app-border)]"
                           >
                             {bucket.colorSegments.map((seg) => (
                               <div
@@ -1102,7 +1102,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       </div>
                       <span
                         className={`font-mono text-[10px] tabular-nums ${
-                          isSelected ? 'font-bold text-stone-900' : 'text-stone-400'
+                          isSelected ? 'font-bold text-[var(--app-text)]' : 'text-[var(--app-text-subtle)]'
                         }`}
                       >
                         {bucket.dayNum}
@@ -1141,9 +1141,9 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           )}
 
           {activeBucket?.topBullet && (
-            <p className="mt-2 border-t border-stone-100 pt-2.5 text-xs text-stone-600">
+            <p className="mt-2 border-t border-[var(--app-divider)] pt-2.5 text-xs text-[var(--app-text-muted)]">
               Nota chiave del{' '}
-              <span className="font-semibold text-stone-900">{activeBucket.shortLabel}</span>:{' '}
+              <span className="font-semibold text-[var(--app-text)]">{activeBucket.shortLabel}</span>:{' '}
               {activeBucket.topBullet}
             </p>
           )}
@@ -1155,24 +1155,24 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       render: () => (
         <section
           ref={colorsChartRef}
-          className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs"
+          className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Palette className="h-4 w-4 text-purple-700" aria-hidden="true" />
-              <h3 className="text-sm font-bold text-stone-900">
+              <Palette className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
+              <h3 className="text-sm font-bold text-[var(--app-text)]">
                 Colori &amp; Valenza emotiva (+2 a -2)
               </h3>
             </div>
 
-            <div className="inline-flex items-center gap-1 rounded-xl bg-purple-50/90 border border-purple-200/70 p-1">
+            <div className="inline-flex items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
               <button
                 type="button"
                 onClick={() => updatePref('colorChartType', 'donut')}
                 className={`min-h-[28px] rounded-lg px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
                   prefs.colorChartType === 'donut'
-                    ? 'bg-stone-900 text-white shadow-xs'
-                    : 'text-stone-700 hover:text-stone-900'
+                    ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                 }`}
               >
                 6 Colori
@@ -1182,8 +1182,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 onClick={() => updatePref('colorChartType', 'valence')}
                 className={`min-h-[28px] rounded-lg px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
                   prefs.colorChartType === 'valence'
-                    ? 'bg-stone-900 text-white shadow-xs'
-                    : 'text-stone-700 hover:text-stone-900'
+                    ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                 }`}
               >
                 Punteggi (+2 / +1 / 0 / -1 / -2)
@@ -1205,7 +1205,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     cy="56"
                     r="44"
                     fill="none"
-                    stroke="#F5F5F4"
+                    stroke="var(--app-divider)"
                     strokeWidth="14"
                   />
                   {donutSegments.map((seg) => (
@@ -1223,10 +1223,10 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   ))}
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="font-mono text-lg font-bold text-stone-900 tabular-nums">
+                  <span className="font-mono text-lg font-bold text-[var(--app-text)] tabular-nums">
                     {flatEntries.length}
                   </span>
-                  <span className="text-[10px] text-stone-500">appunti</span>
+                  <span className="text-[10px] text-[var(--app-text-muted)]">appunti</span>
                 </div>
               </div>
 
@@ -1234,21 +1234,21 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 {usedColorStats.map(({ meta, count, pct }) => (
                   <div key={meta.key} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-2 font-medium text-stone-800">
+                      <span className="flex items-center gap-2 font-medium text-[var(--app-text)]">
                         <span
                           className={`h-2.5 w-2.5 rounded-full border shrink-0 ${meta.swatchClass}`}
                           aria-hidden="true"
                         />
                         <span>{meta.label}</span>
-                        <span className="text-[11px] font-normal text-stone-400">
+                        <span className="text-[11px] font-normal text-[var(--app-text-subtle)]">
                           · {meta.valenceLabel}
                         </span>
                       </span>
-                      <span className="font-mono text-stone-600 tabular-nums">
+                      <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
                         {count} ({pct}%)
                       </span>
                     </div>
-                    <div className="h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
+                    <div className="h-1.5 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all"
                         style={{
@@ -1263,7 +1263,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             </div>
           ) : (
             <div className="mt-4 space-y-4">
-              <div className="h-4 w-full rounded-full overflow-hidden bg-stone-100 flex">
+              <div className="h-4 w-full rounded-full overflow-hidden bg-[var(--app-divider)] flex">
                 {colorValenceStats.map((item) =>
                   item.count > 0 ? (
                     <div
@@ -1282,15 +1282,15 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 {colorValenceStats.map((item) => (
                   <div key={item.valence} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-stone-800">
+                      <span className="font-semibold text-[var(--app-text)]">
                         {item.meta.scoreLabel} · {item.meta.label}{' '}
-                        <span className="font-normal text-stone-400">({item.meta.subtitle})</span>
+                        <span className="font-normal text-[var(--app-text-subtle)]">({item.meta.subtitle})</span>
                       </span>
-                      <span className="font-mono text-stone-600 tabular-nums">
+                      <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
                         {item.count} ({item.pct}%)
                       </span>
                     </div>
-                    <div className="h-2 w-full rounded-full bg-stone-100 overflow-hidden">
+                    <div className="h-2 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all"
                         style={{
@@ -1312,24 +1312,24 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       render: () => (
         <section
           ref={hourlyChartRef}
-          className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs"
+          className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-purple-700" aria-hidden="true" />
-              <h3 className="text-sm font-bold text-stone-900">
+              <Clock className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
+              <h3 className="text-sm font-bold text-[var(--app-text)]">
                 Orari &amp; Fasce (Pomeriggio 13:30–18:30)
               </h3>
             </div>
 
-            <div className="inline-flex items-center gap-1 rounded-xl bg-purple-50/90 border border-purple-200/70 p-1">
+            <div className="inline-flex items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
               <button
                 type="button"
                 onClick={() => updatePref('hourlyChartType', 'hours24')}
                 className={`min-h-[28px] rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-colors ${
                   prefs.hourlyChartType === 'hours24'
-                    ? 'bg-stone-900 text-white shadow-xs'
-                    : 'text-stone-700 hover:text-stone-900'
+                    ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                 }`}
               >
                 Ore 00–23
@@ -1339,8 +1339,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 onClick={() => updatePref('hourlyChartType', 'periodValence')}
                 className={`min-h-[28px] rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-colors ${
                   prefs.hourlyChartType === 'periodValence'
-                    ? 'bg-stone-900 text-white shadow-xs'
-                    : 'text-stone-700 hover:text-stone-900'
+                    ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                 }`}
               >
                 Valenza per fascia
@@ -1363,7 +1363,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   const hex =
                     slot.count > 0
                       ? NOTE_COLORS[slot.dominantColor]?.hex || '#F59E0B'
-                      : '#E7E5E4';
+                      : 'var(--app-divider)';
                   const x = idx * 20 + 2;
                   return (
                     <g key={slot.hour}>
@@ -1380,7 +1380,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     </g>
                   );
                 })}
-                <line x1="0" y1="76" x2="480" y2="76" stroke="#E7E5E4" strokeWidth="1" />
+                <line x1="0" y1="76" x2="480" y2="76" stroke="var(--app-divider)" strokeWidth="1" />
                 {[0, 6, 13, 18, 23].map((h) => (
                   <text
                     key={h}
@@ -1388,7 +1388,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     y="90"
                     textAnchor="middle"
                     fontSize="10"
-                    fill="#78716C"
+                    fill="var(--app-text-subtle)"
                     fontFamily="monospace"
                   >
                     {h === 13 ? '13:30' : h === 18 ? '18:31' : String(h).padStart(2, '0')}
@@ -1403,12 +1403,12 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 return (
                   <div key={dp.period} className="space-y-1">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-stone-800">{dp.meta.title}</span>
-                      <span className="font-mono text-stone-500 tabular-nums">
+                      <span className="font-semibold text-[var(--app-text)]">{dp.meta.title}</span>
+                      <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
                         {dp.count} ({dp.pct}%)
                       </span>
                     </div>
-                    <div className="h-2.5 w-full rounded-full bg-stone-100 overflow-hidden flex">
+                    <div className="h-2.5 w-full rounded-full bg-[var(--app-divider)] overflow-hidden flex">
                       {dp.count > 0 && (
                         <>
                           {dp.valenceCounts.very_positive > 0 && (
@@ -1466,7 +1466,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           )}
 
           {/* Clickable 4 Time-of-Day Windows */}
-          <div className="mt-4 divide-y divide-stone-100">
+          <div className="mt-4 divide-y divide-[var(--app-divider)]">
             {dayPeriodStats.map((dp) => (
               <div key={dp.period} className="py-2.5 first:pt-0 last:pb-0">
                 <div className="flex items-center justify-between text-xs">
@@ -1475,24 +1475,24 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     onClick={() =>
                       setDayPeriodFilter((curr) => (curr === dp.period ? 'all' : dp.period))
                     }
-                    className="font-semibold text-stone-800 hover:text-purple-800 text-left"
+                    className="font-semibold text-[var(--app-text)] hover:text-[var(--app-accent-text)] text-left"
                   >
                     {dp.meta.title}{' '}
-                    <span className="font-mono font-normal text-stone-400 tabular-nums">
+                    <span className="font-mono font-normal text-[var(--app-text-subtle)] tabular-nums">
                       ({dp.meta.range})
                     </span>
                     {busiestPeriod?.period === dp.period && dp.count > 0 && (
-                      <span className="ml-1.5 text-[11px] font-semibold text-purple-700">
+                      <span className="ml-1.5 text-[11px] font-semibold text-[var(--app-accent-text)]">
                         · Più attiva
                       </span>
                     )}
                   </button>
-                  <span className="font-mono text-stone-600 tabular-nums">
+                  <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
                     {dp.count} ({dp.pct}%)
                   </span>
                 </div>
                 {dp.topSensations.length > 0 && (
-                  <p className="mt-1 text-[11px] text-stone-600 leading-relaxed">
+                  <p className="mt-1 text-[11px] text-[var(--app-text-muted)] leading-relaxed">
                     {dp.topSensations.map((s) => `${s.text} (${s.count})`).join(' · ')}
                   </p>
                 )}
@@ -1505,21 +1505,21 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     {
       id: 'stats_sensations',
       render: () => (
-        <section className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs">
+        <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <Smile className="h-4 w-4 text-purple-700" aria-hidden="true" />
+              <Smile className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
               <div>
-                <h3 className="text-sm font-bold text-stone-900">
+                <h3 className="text-sm font-bold text-[var(--app-text)]">
                   Sensazioni, stati d’animo e correlazione colori
                 </h3>
-                <p className="text-[11px] text-stone-500 mt-0.5">
+                <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
                   +2 Celeste · +1 Celeste chiaro · 0 Ambra · -1 Rosso chiaro · -2 Rosso / Antracita
                 </p>
               </div>
             </div>
 
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl bg-purple-50/90 border border-purple-200/70 p-1">
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
               {(
                 [
                   { id: 'all', label: 'Tutte' },
@@ -1536,8 +1536,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   onClick={() => setSensationToneFilter(t.id)}
                   className={`min-h-[28px] rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
                     sensationToneFilter === t.id
-                      ? 'bg-stone-900 text-white shadow-xs'
-                      : 'text-stone-700 hover:text-stone-900'
+                      ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                      : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                   }`}
                 >
                   {t.label}
@@ -1547,7 +1547,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           </div>
 
           {sensationAnalytics.totalBullets === 0 ? (
-            <p className="mt-4 text-xs text-stone-500">
+            <p className="mt-4 text-xs text-[var(--app-text-muted)]">
               Ancora nessuna sintesi di sensazioni presente negli appunti filtrati. Registra una
               nuova nota vocale per estrarle automaticamente.
             </p>
@@ -1555,10 +1555,10 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
               <div className="lg:col-span-5 space-y-4">
                 <div>
-                  <p className="text-xs font-medium text-stone-600 mb-2">
+                  <p className="text-xs font-medium text-[var(--app-text-muted)] mb-2">
                     Equilibrio delle sensazioni ({sensationAnalytics.totalBullets} rilevazioni)
                   </p>
-                  <div className="h-3 w-full rounded-full overflow-hidden bg-stone-100 flex">
+                  <div className="h-3 w-full rounded-full overflow-hidden bg-[var(--app-divider)] flex">
                     {sensationAnalytics.veryPositiveCount > 0 && (
                       <div
                         style={{
@@ -1605,7 +1605,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       />
                     )}
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-stone-600">
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--app-text-muted)]">
                     <span className="inline-flex items-center gap-1.5">
                       <span className="h-2 w-2 rounded-full bg-sky-500" aria-hidden="true" />
                       Contento ({sensationAnalytics.veryPositiveCount})
@@ -1629,8 +1629,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="border-t border-stone-100 pt-3">
-                  <p className="text-xs font-medium text-stone-600 mb-2">Aree più annotate</p>
+                <div className="border-t border-[var(--app-divider)] pt-3">
+                  <p className="text-xs font-medium text-[var(--app-text-muted)] mb-2">Aree più annotate</p>
                   <div className="space-y-1.5">
                     {sensationAnalytics.categories.map((cat) => {
                       const pct = Math.round(
@@ -1638,8 +1638,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       );
                       return (
                         <div key={cat.name} className="flex items-center justify-between text-xs">
-                          <span className="font-medium text-stone-800">{cat.name}</span>
-                          <span className="font-mono text-stone-500 tabular-nums">
+                          <span className="font-medium text-[var(--app-text)]">{cat.name}</span>
+                          <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
                             {cat.count} ({pct}%)
                           </span>
                         </div>
@@ -1649,21 +1649,21 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 </div>
 
                 {sensationAnalytics.colorCorrelations.length > 0 && (
-                  <div className="border-t border-stone-100 pt-3">
-                    <p className="text-xs font-medium text-stone-600 mb-2">
+                  <div className="border-t border-[var(--app-divider)] pt-3">
+                    <p className="text-xs font-medium text-[var(--app-text-muted)] mb-2">
                       Sensazioni frequenti per colore
                     </p>
                     <div className="space-y-2">
                       {sensationAnalytics.colorCorrelations.map(({ meta, topBullets }) => (
                         <div key={meta.key} className="text-xs">
-                          <span className="inline-flex items-center gap-1.5 font-semibold text-stone-800">
+                          <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--app-text)]">
                             <span
                               className={`h-2 w-2 rounded-full border shrink-0 ${meta.swatchClass}`}
                               aria-hidden="true"
                             />
                             {meta.label}:
                           </span>{' '}
-                          <span className="text-stone-600">
+                          <span className="text-[var(--app-text-muted)]">
                             {topBullets.map((b) => `${b.text} (${b.count})`).join(' · ')}
                           </span>
                         </div>
@@ -1674,11 +1674,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               </div>
 
               <div className="lg:col-span-7 space-y-2.5">
-                <p className="text-xs font-medium text-stone-600">
+                <p className="text-xs font-medium text-[var(--app-text-muted)]">
                   Sensazioni e stati più frequenti
                 </p>
                 {sensationAnalytics.topPhrases.length === 0 ? (
-                  <p className="text-xs text-stone-400 py-4">
+                  <p className="text-xs text-[var(--app-text-subtle)] py-4">
                     Nessuna sensazione in questa categoria.
                   </p>
                 ) : (
@@ -1699,14 +1699,14 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     return (
                       <div key={phrase.text} className="space-y-1">
                         <div className="flex items-center justify-between gap-2 text-xs">
-                          <span className="text-stone-800 font-medium truncate">
+                          <span className="text-[var(--app-text)] font-medium truncate">
                             {phrase.text}
                           </span>
-                          <span className="font-mono text-stone-500 tabular-nums shrink-0">
+                          <span className="font-mono text-[var(--app-text-muted)] tabular-nums shrink-0">
                             {phrase.count}×
                           </span>
                         </div>
-                        <div className="h-2 w-full rounded-full bg-stone-100 overflow-hidden">
+                        <div className="h-2 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
                           <div
                             className={`h-full rounded-full ${barColor}`}
                             style={{ width: `${widthPct}%` }}
@@ -1727,20 +1727,20 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
   return (
     <div className="space-y-5">
       {/* Header + Filters + Summary Strip */}
-      <section className="rounded-3xl border border-stone-900/12 bg-white p-4 sm:p-5 shadow-xs">
+      <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <CatIllustration
               src={statsNeko.src}
               alt={statsNeko.alt}
-              className="h-16 w-16 rounded-2xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8] shrink-0"
+              className="h-16 w-16 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
             />
             <div>
-              <h2 className="flex items-center gap-2 text-base sm:text-lg font-bold text-stone-900">
-                <BarChart3 className="h-4 w-4 text-purple-700" aria-hidden="true" />
+              <h2 className="flex items-center gap-2 text-base sm:text-lg font-bold text-[var(--app-text)]">
+                <BarChart3 className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
                 Statistiche &amp; Grafici
               </h2>
-              <p className="text-xs text-stone-600 mt-0.5">
+              <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
                 +2 Contento · +1 Abbastanza bene · 0 Normale · -1 Male · -2 Malissimo
               </p>
             </div>
@@ -1751,7 +1751,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               <button
                 type="button"
                 onClick={resetAllFilters}
-                className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-600 hover:bg-stone-50 whitespace-nowrap shrink-0"
+                className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-3 py-1.5 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] whitespace-nowrap shrink-0"
               >
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
                 Ripristina filtri
@@ -1766,7 +1766,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             <div
               role="tablist"
               aria-label="Periodo statistiche"
-              className="flex flex-wrap items-center gap-1 rounded-xl bg-purple-50/90 border border-purple-200/70 p-1"
+              className="flex flex-wrap items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1"
             >
               {(
                 [
@@ -1791,8 +1791,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     }}
                     className={`min-h-[34px] rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
                       active
-                        ? 'bg-stone-900 text-white shadow-xs'
-                        : 'text-stone-700 hover:text-stone-900'
+                        ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                        : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                     }`}
                   >
                     {tab.label}
@@ -1803,7 +1803,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
 
             <div className="relative w-full sm:w-56">
               <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-stone-400"
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--app-text-subtle)]"
                 aria-hidden="true"
               />
               <input
@@ -1812,14 +1812,14 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 onChange={(e) => setKeywordFilter(e.target.value)}
                 placeholder="Filtra per parola o stato..."
                 aria-label="Filtra statistiche per parola"
-                className="w-full min-h-[38px] rounded-xl border border-stone-200 bg-[#FAF7F0] pl-8 pr-7 py-1 text-xs text-stone-900 placeholder:text-stone-400 focus:border-purple-500 focus:bg-white focus:outline-none"
+                className="w-full min-h-[38px] rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] pl-8 pr-7 py-1 text-xs text-[var(--app-text)] placeholder:text-[var(--app-text-subtle)] focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
               />
               {keywordFilter && (
                 <button
                   type="button"
                   onClick={() => setKeywordFilter('')}
                   aria-label="Pulisci filtro parola"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--app-text-subtle)] hover:text-[var(--app-text)]"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -1828,20 +1828,20 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           </div>
 
           {periodFilter === 'single_day' && (
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-purple-200/80 bg-purple-50/40 p-2.5 text-xs">
-              <label className="flex items-center gap-2 text-stone-700">
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)] p-2.5 text-xs">
+              <label className="flex items-center gap-2 text-[var(--app-text)]">
                 <span className="font-semibold">Seleziona giornata:</span>
                 <input
                   type="date"
                   value={singleDayDate}
                   onChange={(e) => setSingleDayDate(e.target.value || todayISO)}
-                  className="rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 font-mono text-xs text-stone-900 tabular-nums"
+                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1.5 font-mono text-xs text-[var(--app-text)] tabular-nums"
                 />
               </label>
               <button
                 type="button"
                 onClick={() => setSingleDayDate(todayISO)}
-                className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50"
+                className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 text-xs font-medium text-[var(--app-text)] hover:bg-[var(--app-card-alt)]"
               >
                 Oggi
               </button>
@@ -1849,23 +1849,23 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           )}
 
           {periodFilter === 'custom' && (
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-200/80 bg-[#FAF7F0] p-2.5 text-xs">
-              <label className="flex items-center gap-2 text-stone-600">
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-2.5 text-xs">
+              <label className="flex items-center gap-2 text-[var(--app-text-muted)]">
                 <span className="font-medium">Dal:</span>
                 <input
                   type="date"
                   value={customStartDate}
                   onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 font-mono text-xs text-stone-900 tabular-nums"
+                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 font-mono text-xs text-[var(--app-text)] tabular-nums"
                 />
               </label>
-              <label className="flex items-center gap-2 text-stone-600">
+              <label className="flex items-center gap-2 text-[var(--app-text-muted)]">
                 <span className="font-medium">Al:</span>
                 <input
                   type="date"
                   value={customEndDate}
                   onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 font-mono text-xs text-stone-900 tabular-nums"
+                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 font-mono text-xs text-[var(--app-text)] tabular-nums"
                 />
               </label>
             </div>
@@ -1892,8 +1892,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   onClick={() => applyValencePreset(preset.id)}
                   className={`min-h-[32px] rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                     active
-                      ? 'border-stone-900 bg-stone-900 text-white'
-                      : 'border-stone-200 bg-white text-stone-600 hover:border-purple-300'
+                      ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                      : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
                   }`}
                 >
                   {preset.label}
@@ -1901,7 +1901,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               );
             })}
 
-            <span aria-hidden="true" className="mx-1 text-stone-300">
+            <span aria-hidden="true" className="mx-1 text-[var(--app-text-subtle)]">
               |
             </span>
 
@@ -1916,8 +1916,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   title={`Includi o escludi ${col.label} (${col.valenceLabel})`}
                   className={`min-h-[32px] inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                     selected
-                      ? 'border-stone-900 bg-stone-900 text-white'
-                      : 'border-stone-200 bg-white text-stone-600 hover:border-purple-300'
+                      ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                      : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
                   }`}
                 >
                   <span
@@ -1938,8 +1938,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               aria-pressed={dayPeriodFilter === 'all'}
               className={`min-h-[32px] rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                 dayPeriodFilter === 'all'
-                  ? 'border-stone-900 bg-stone-900 text-white'
-                  : 'border-stone-200 bg-white text-stone-600 hover:border-purple-300'
+                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
               }`}
             >
               Tutte le fasce orarie
@@ -1954,8 +1954,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   aria-pressed={active}
                   className={`min-h-[32px] rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                     active
-                      ? 'border-stone-900 bg-stone-900 text-white'
-                      : 'border-stone-200 bg-white text-stone-600 hover:border-purple-300'
+                      ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                      : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
                   }`}
                 >
                   {DAY_PERIOD_LABELS[dp].title} ({DAY_PERIOD_LABELS[dp].shortRange})
@@ -1966,22 +1966,22 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         </div>
 
         {/* Summary Metrics Strip */}
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-stone-200/80 border-t border-stone-100 pt-4">
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--app-divider)] border-t border-[var(--app-divider)] pt-4">
           <div className="py-2 sm:py-0 sm:pr-4">
-            <span className="block text-[11px] text-stone-500">Appunti analizzati</span>
-            <span className="mt-0.5 block font-mono text-xl font-bold text-stone-900 tabular-nums">
+            <span className="block text-[11px] text-[var(--app-text-muted)]">Appunti analizzati</span>
+            <span className="mt-0.5 block font-mono text-xl font-bold text-[var(--app-text)] tabular-nums">
               {flatEntries.length}
             </span>
           </div>
           <div className="py-2 sm:py-0 sm:px-4">
-            <span className="block text-[11px] text-stone-500">Giorni con note</span>
-            <span className="mt-0.5 block font-mono text-xl font-bold text-stone-900 tabular-nums">
+            <span className="block text-[11px] text-[var(--app-text-muted)]">Giorni con note</span>
+            <span className="mt-0.5 block font-mono text-xl font-bold text-[var(--app-text)] tabular-nums">
               {activeDaysCount}
             </span>
           </div>
           <div className="py-2 sm:py-0 sm:px-4">
-            <span className="block text-[11px] text-stone-500">Media valenza (-2 a +2)</span>
-            <span className="mt-0.5 block font-mono text-sm font-semibold text-stone-900 tabular-nums">
+            <span className="block text-[11px] text-[var(--app-text-muted)]">Media valenza (-2 a +2)</span>
+            <span className="mt-0.5 block font-mono text-sm font-semibold text-[var(--app-text)] tabular-nums">
               {avgValenceScore === null
                 ? '—'
                 : `${avgValenceScore > 0 ? '+' : ''}${avgValenceScore.toFixed(2)} (${scoreToVerdict(
@@ -1990,8 +1990,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             </span>
           </div>
           <div className="py-2 sm:py-0 sm:pl-4">
-            <span className="block text-[11px] text-stone-500">Colore più frequente</span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-stone-900">
+            <span className="block text-[11px] text-[var(--app-text-muted)]">Colore più frequente</span>
+            <span className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-[var(--app-text)]">
               {topColor ? (
                 <>
                   <span
@@ -2011,16 +2011,16 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       </section>
 
       {flatEntries.length === 0 ? (
-        <section className="rounded-3xl border border-dashed border-purple-300/80 bg-white/90 p-8 text-center">
+        <section className="rounded-3xl border border-dashed border-[var(--app-accent-soft-border)] bg-[var(--app-card)] p-8 text-center">
           <CatIllustration
             src={statsEmptyNeko.src}
             alt={statsEmptyNeko.alt}
-            className="mx-auto h-32 w-32 rounded-3xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8]"
+            className="mx-auto h-32 w-32 rounded-3xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)]"
           />
-          <h3 className="mt-4 text-sm font-bold text-stone-900">
+          <h3 className="mt-4 text-sm font-bold text-[var(--app-text)]">
             Nessun dato corrisponde ai filtri ({dateRange.label})
           </h3>
-          <p className="mt-1 text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
+          <p className="mt-1 text-xs text-[var(--app-text-muted)] max-w-sm mx-auto leading-relaxed">
             Prova ad allargare il periodo, rimuovere un filtro colore oppure aggiungi un nuovo
             appunto vocale per vedere subito i grafici.
           </p>
@@ -2029,7 +2029,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               <button
                 type="button"
                 onClick={resetAllFilters}
-                className="min-h-[44px] inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 transition-colors"
+                className="min-h-[44px] inline-flex items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-4 py-2 text-xs font-semibold text-[var(--app-text)] hover:bg-[var(--app-card-alt)] transition-colors"
               >
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
                 Ripristina filtri
@@ -2038,7 +2038,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             <button
               type="button"
               onClick={() => onCreateBlankEntry(periodFilter === 'single_day' ? singleDayDate : todayISO)}
-              className="min-h-[44px] inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2 text-xs font-semibold text-white hover:bg-stone-800 transition-colors"
+              className="min-h-[44px] inline-flex items-center gap-2 rounded-xl bg-[var(--app-btn-bg)] px-4 py-2 text-xs font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] transition-colors"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
               Aggiungi appunto

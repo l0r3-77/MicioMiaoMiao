@@ -53,6 +53,8 @@ import {
   toISODate,
 } from '../utils/dateUtils';
 import type { LayoutSectionKey, SectionLayoutState } from '../utils/layoutPreferences';
+import { parseApiJsonSafe } from '../utils/apiError';
+import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import { publishQuotaSnapshot } from '../utils/quotaTracker';
 import { CatEmoticonIcon, CatEmoticonPicker } from './CatEmoticon';
 import {
@@ -69,6 +71,7 @@ interface OrganizzaSubsectionProps {
   todoItems: TodoNoteItem[];
   organizeItems: OrganizeNoteItem[];
   sectionLayout: SectionLayoutState;
+  focusTodaySignal?: number;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddOrganizeItem: (item: OrganizeNoteItem) => void;
@@ -97,6 +100,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   todoItems,
   organizeItems,
   sectionLayout,
+  focusTodaySignal = 0,
   onChangeLayout,
   onResetLayout,
   onAddOrganizeItem,
@@ -202,6 +206,21 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       setShowEditCatPicker(false);
     }
   }, [selectedOrgItem?.id]);
+
+  // Land on today's date whenever Organizza opens or focusTodaySignal increments
+  useEffect(() => {
+    setRangeStartIso(todayIso);
+    const timer = window.setTimeout(() => {
+      const container = scrollContainerRef.current;
+      const el = container?.querySelector('[data-today-card="true"]') as HTMLElement | null;
+      if (el && container) {
+        container.scrollTop = Math.max(0, el.offsetTop - container.offsetTop - 4);
+      } else {
+        container?.scrollTo({ top: 0, behavior: 'auto' });
+      }
+    }, 45);
+    return () => window.clearTimeout(timer);
+  }, [focusTodaySignal, todayIso]);
 
   const resetOrgDragState = () => {
     pointerDragRef.current = null;
@@ -429,13 +448,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     );
   };
 
-  // Transcribe-only (no audio saved)
+  // Transcribe-only (no audio saved), background-safe
   const handleStopAndSaveVoiceNewNote = async () => {
     setNewModalError(null);
     const rec = await stopRecording();
     if (!rec) return;
 
     setIsTranscribing(true);
+    const stopSession = startBackgroundSession('Trascrizione nota vocale in corso');
     try {
       const res = await fetch('/api/notes/transcribe-todo', {
         method: 'POST',
@@ -445,17 +465,17 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
           mimeType: rec.mimeType,
         }),
       });
-      const raw = await res.text();
-      let data: { text?: string; emoji?: string; quota?: unknown; error?: string } = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = {};
-      }
+      const data = await parseApiJsonSafe<{
+        text?: string;
+        emoji?: string;
+        quota?: unknown;
+        error?: string;
+      }>(res);
       if (data.quota) publishQuotaSnapshot(data.quota);
       if (!res.ok || !data.text?.trim()) {
         setNewModalError(
-          data.error || 'Impossibile trascrivere la registrazione. Riprova o scrivi a mano.'
+          data.error ||
+            'Impossibile trascrivere la registrazione. Riprova o scrivi a mano.'
         );
         return;
       }
@@ -489,6 +509,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     } catch {
       setNewModalError('Errore di rete durante la trascrizione.');
     } finally {
+      stopSession();
       setIsTranscribing(false);
     }
   };
@@ -561,13 +582,10 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ rawText: strictLines.join('\n') }),
         });
-        const text = await res.text();
-        const data = text
-          ? (JSON.parse(text) as {
-              items?: Array<{ text?: string; emoji?: string }>;
-              quota?: unknown;
-            })
-          : {};
+        const data = await parseApiJsonSafe<{
+          items?: Array<{ text?: string; emoji?: string }>;
+          quota?: unknown;
+        }>(res);
         if (data.quota) publishQuotaSnapshot(data.quota);
         if (Array.isArray(data.items) && data.items.length === strictLines.length) {
           emojiSuggestions = data.items.map((it) =>
@@ -636,23 +654,11 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     }
   };
 
-  // Zoom calibration (1 to 4 days visible in scroll viewport)
-  const isDense4 = visibleDaysZoom >= 4;
-  const isDense3 = visibleDaysZoom === 3;
-  const dayMinHeightCalc =
-    visibleDaysZoom === 1
-      ? 'calc(100% - 4px)'
-      : visibleDaysZoom === 2
-        ? 'calc((100% - 6px) / 2)'
-        : visibleDaysZoom === 3
-          ? 'calc((100% - 12px) / 3)'
-          : 'calc((100% - 18px) / 4)';
-
   const blocks: CustomizableBlockItem[] = [
     {
       id: 'org_controls',
       render: () => (
-        <section className="rounded-2xl border border-[#7ECBBF]/85 bg-[#F7FEFC]/95 p-3 shadow-xs">
+        <section className="rounded-2xl border border-[var(--todo-card-border)] bg-[var(--todo-card)] p-3 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
               <button
@@ -661,16 +667,16 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                   setRangeStartIso(todayIso);
                   scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
-                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] px-2.5 py-1 text-xs font-semibold text-white hover:from-[#0C786E] hover:to-[#08443E] transition-colors"
+                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl bg-gradient-to-b from-[var(--todo-accent)] to-[var(--todo-accent-dark)] px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90 transition-opacity"
               >
-                <Calendar className="h-3.5 w-3.5 text-[#99F6E4]" aria-hidden="true" />
+                <Calendar className="h-3.5 w-3.5 opacity-90" aria-hidden="true" />
                 Oggi
               </button>
               <button
                 type="button"
                 onClick={() => setRangeStartIso((prev) => addDaysISO(prev, -4))}
                 aria-label="Giorni precedenti"
-                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[#7ECBBF] bg-[#E5F9F4] px-2 py-1 text-xs font-semibold text-[#0B4F49] hover:bg-[#D4F3EC]"
+                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] px-2 py-1 text-xs font-semibold text-[var(--todo-text)] hover:opacity-85"
               >
                 <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Prima</span>
@@ -679,7 +685,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 type="button"
                 onClick={() => setRangeStartIso((prev) => addDaysISO(prev, 4))}
                 aria-label="Giorni successivi"
-                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[#7ECBBF] bg-[#E5F9F4] px-2 py-1 text-xs font-semibold text-[#0B4F49] hover:bg-[#D4F3EC]"
+                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] px-2 py-1 text-xs font-semibold text-[var(--todo-text)] hover:opacity-85"
               >
                 <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Dopo</span>
@@ -696,16 +702,16 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 }}
                 aria-label="Stampa o esporta programma"
                 title="Stampa & Esporta giornata o settimana"
-                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[#7ECBBF] bg-[#E5F9F4] px-2 py-1 text-[11px] font-semibold text-[#0B4F49] hover:bg-[#D4F3EC] transition-colors whitespace-nowrap"
+                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] px-2 py-1 text-[11px] font-semibold text-[var(--todo-text)] hover:opacity-85 transition-opacity whitespace-nowrap"
               >
-                <Printer className="h-3.5 w-3.5 text-[#0F766E]" aria-hidden="true" />
+                <Printer className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
                 <span className="hidden sm:inline">Stampa</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => openNewNoteModal(todayIso, 'mattina')}
-                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[#74C4B6] bg-[#D8F4EE] px-2.5 py-1 text-xs font-semibold text-[#083B37] hover:bg-[#BEECE1] transition-colors whitespace-nowrap"
+                className="min-h-[34px] inline-flex items-center gap-1 rounded-xl border border-[var(--todo-shell-border)] bg-[var(--todo-accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--todo-text)] hover:opacity-85 transition-opacity whitespace-nowrap"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Nuova nota</span>
@@ -718,34 +724,34 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     {
       id: 'org_calendar',
       render: () => (
-        <section className="rounded-2xl border border-[#7ECBBF]/85 bg-[#F7FEFC]/95 p-2 sm:p-3 shadow-xs space-y-2">
+        <section className="rounded-2xl border border-[var(--todo-card-border)] bg-[var(--todo-card)] p-2 sm:p-3 shadow-xs space-y-2">
           <div className="flex items-center justify-between px-1">
-            <span className="text-[11px] font-semibold text-[#0B534D]">
+            <span className="text-[11px] font-semibold text-[var(--todo-text-muted)]">
               Calendario verticale
             </span>
             <button
               type="button"
               onClick={() => setRangeStartIso((prev) => addDaysISO(prev, -7))}
-              className="text-[11px] font-semibold text-[#0F766E] hover:underline whitespace-nowrap"
+              className="text-[11px] font-semibold text-[var(--todo-accent)] hover:underline whitespace-nowrap"
             >
               +7 giorni prima
             </button>
           </div>
 
-          {/* Horizontal Zoom Bar INSIDE the calendar block: 1 to 4 visible days */}
-          <div className="rounded-xl border border-[#9BDCD1] bg-[#EDFBF8]/95 px-2.5 py-1.5 space-y-1">
+          {/* Horizontal Zoom Bar INSIDE the calendar block: 1 to 4 */}
+          <div className="rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] px-2.5 py-1.5 space-y-1">
             <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-[#0B4F49]">
-                <ZoomIn className="h-3 w-3 text-[#0F766E]" aria-hidden="true" />
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-[var(--todo-text)]">
+                <ZoomIn className="h-3 w-3 text-[var(--todo-accent)]" aria-hidden="true" />
                 Zoom giorni
               </span>
-              <span className="font-mono text-[11px] font-bold text-[#083B37] tabular-nums">
+              <span className="font-mono text-[11px] font-bold text-[var(--todo-text)] tabular-nums">
                 {visibleDaysZoom} {visibleDaysZoom === 1 ? 'giorno' : 'giorni'}
               </span>
             </div>
 
             <div className="flex items-center gap-2.5">
-              <span className="font-mono text-[10px] font-semibold text-[#0E645D] shrink-0">1</span>
+              <span className="font-mono text-[10px] font-semibold text-[var(--todo-text-muted)] shrink-0">1</span>
               <input
                 type="range"
                 min={1}
@@ -754,9 +760,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 value={visibleDaysZoom}
                 onChange={(e) => setVisibleDaysZoom(Number(e.target.value))}
                 aria-label="Regola zoom dei giorni da 1 a 4"
-                className="flex-1 accent-[#0D7D72] cursor-pointer"
+                className="flex-1 accent-[var(--todo-accent)] cursor-pointer"
               />
-              <span className="font-mono text-[10px] font-semibold text-[#0E645D] shrink-0">4</span>
+              <span className="font-mono text-[10px] font-semibold text-[var(--todo-text-muted)] shrink-0">4</span>
 
               <div className="hidden sm:flex items-center gap-1 ml-1">
                 {[1, 2, 3, 4].map((num) => (
@@ -766,8 +772,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     onClick={() => setVisibleDaysZoom(num)}
                     className={`min-h-[24px] min-w-[24px] rounded-md border text-[11px] font-bold tabular-nums transition-colors ${
                       visibleDaysZoom === num
-                        ? 'border-[#08443E] bg-[#0B5B53] text-white'
-                        : 'border-[#7ECBBF] bg-[#F7FEFC] text-[#0B4F49] hover:border-[#0E8A7E]'
+                        ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
+                        : 'border-[var(--todo-chip-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:border-[var(--todo-accent)]'
                     }`}
                   >
                     {num}
@@ -777,10 +783,10 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             </div>
           </div>
 
-          {/* Vertical Scrollable Calendar Viewport (calibrated for 1-4 stacked-phase days) */}
+          {/* Vertical Scrollable Calendar Viewport (no artificial minHeight: days shrink-wrap notes) */}
           <div
             ref={scrollContainerRef}
-            className="h-[620px] sm:h-[680px] overflow-y-auto pr-1 space-y-1.5"
+            className="h-[620px] sm:h-[680px] overflow-y-auto pr-1 space-y-2"
           >
             {daysList.map((isoDate) => {
               const isToday = isoDate === todayIso;
@@ -794,32 +800,24 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
               return (
                 <article
                   key={isoDate}
-                  style={{ minHeight: dayMinHeightCalc }}
+                  data-today-card={isToday ? 'true' : undefined}
                   className={`rounded-xl border flex flex-col transition-colors ${
                     isToday
-                      ? 'border-[#0E8A7E] bg-gradient-to-b from-[#CEF3EB] to-[#EDFBF8] ring-1 ring-[#0E8A7E]/35'
-                      : 'border-[#9BDCD1]/90 bg-[#EDFBF8]/85'
-                  } ${isDense4 ? 'p-1.5' : isDense3 ? 'p-2' : 'p-2.5'}`}
+                      ? 'border-[var(--todo-day-today-border)] bg-[var(--todo-day-today-bg)] ring-1 ring-[var(--todo-accent)]/40'
+                      : 'border-[var(--todo-card-border)] bg-[var(--todo-day-bg)]'
+                  } p-2`}
                 >
-                  {/* Day Header with unobtrusive Paste & Print buttons */}
-                  <div className="flex items-center justify-between gap-1.5 border-b border-[#B6E6DD]/90 pb-0.5 mb-1">
-                    <div className="flex items-center gap-1 min-w-0">
-                      <span
-                        className={`uppercase font-bold tracking-wide ${
-                          isDense4 ? 'text-[9.5px]' : 'text-[11px]'
-                        } ${isToday ? 'text-[#0B5B53]' : 'text-[#0E645D]'}`}
-                      >
+                  {/* Day Header with Paste, Copy & Print icon buttons */}
+                  <div className="flex items-center justify-between gap-1.5 border-b border-[var(--todo-phase-border)] pb-1 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="uppercase font-bold tracking-wide text-[11px] text-[var(--todo-text-muted)] shrink-0">
                         {weekdayLabel}
                       </span>
-                      <span
-                        className={`font-bold text-[#083B37] truncate ${
-                          isDense4 ? 'text-[11px]' : 'text-xs'
-                        }`}
-                      >
+                      <span className="font-bold text-xs text-[var(--todo-text)] truncate">
                         {dateShort}
                       </span>
                       {isToday && (
-                        <span className="rounded bg-[#0B5B53] px-1.5 py-[1px] text-[9px] font-bold text-white">
+                        <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9px] font-bold text-white shrink-0">
                           Oggi
                         </span>
                       )}
@@ -831,7 +829,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                         onClick={() => handleCopyDayNotes(isoDate)}
                         aria-label={`Copia note di ${dateShort}`}
                         title="Copia tutte le note del giorno con le fasi"
-                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[#7ECBBF] bg-[#E5F9F4] text-[#0F766E] hover:bg-[#C7EFE6] transition-colors"
+                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-accent)] hover:opacity-85 transition-opacity"
                       >
                         {copiedDayIso === isoDate ? (
                           <Check className="h-2.5 w-2.5" aria-hidden="true" />
@@ -844,7 +842,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                         onClick={() => handleOpenPasteModalForDay(isoDate)}
                         aria-label={`Incolla note in ${dateShort}`}
                         title="Incolla da appunti (1 riga = 1 nota)"
-                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[#7ECBBF] bg-[#E5F9F4] text-[#0F766E] hover:bg-[#C7EFE6] transition-colors"
+                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-accent)] hover:opacity-85 transition-opacity"
                       >
                         <ClipboardPaste className="h-2.5 w-2.5" aria-hidden="true" />
                       </button>
@@ -857,20 +855,21 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                         }}
                         aria-label={`Stampa o esporta ${dateShort}`}
                         title="Stampa / Esporta questa giornata"
-                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[#9BDCD1] bg-[#F7FEFC] text-[#0F766E] hover:bg-[#D8F4EE] transition-colors"
+                        className="h-5 w-5 inline-flex items-center justify-center rounded border border-[var(--todo-note-border)] bg-[var(--todo-card)] text-[var(--todo-accent)] hover:opacity-85 transition-opacity"
                       >
                         <Printer className="h-2.5 w-2.5" aria-hidden="true" />
                       </button>
-                      <span className="font-mono text-[10px] font-semibold text-[#0E645D] tabular-nums pl-0.5">
+                      <span className="font-mono text-[10px] font-semibold text-[var(--todo-text-muted)] tabular-nums pl-0.5">
                         {dayTotalCount}
                       </span>
                     </div>
                   </div>
 
-                  {/* 4 Phases ALWAYS Stacked One Below Another (Ultra-Slim Strips) */}
-                  <div className="flex-1 flex flex-col gap-1">
+                  {/* 4 Phases Stacked One Below Another — shrink-wrapped, translucent until populated */}
+                  <div className="flex flex-col gap-1">
                     {DAY_PHASES.map((phase) => {
                       const slotItems = itemsBySlot.get(`${isoDate}|${phase.key}`) || [];
+                      const hasNotes = slotItems.length > 0;
                       const isPhaseDropTarget =
                         dropTarget?.date === isoDate && dropTarget?.phase === phase.key;
                       const isPhaseEndInsert =
@@ -928,32 +927,34 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                           }}
                           className={`rounded-lg border transition-all flex flex-col ${
                             isPhaseDropTarget
-                              ? 'border-[#0E8A7E] bg-[#C7EFE6]/80 ring-1 ring-[#0E8A7E]'
-                              : 'border-[#B6E6DD]/90 bg-[#F7FEFC]/95 hover:border-[#0E8A7E]/65'
-                          } ${isDense4 ? 'px-1.5 py-[2px]' : 'px-2 py-1'}`}
+                              ? 'border-[var(--todo-accent)] bg-[var(--todo-accent-soft)] ring-1 ring-[var(--todo-accent)]'
+                              : hasNotes
+                                ? 'border-[var(--todo-phase-border)] bg-[var(--todo-phase-populated-bg)]'
+                                : 'opacity-40 hover:opacity-80 border-[var(--todo-phase-border)]/60 bg-transparent'
+                          } ${hasNotes ? 'px-1.5 py-1' : 'px-1.5 py-[2px]'}`}
                         >
-                          {/* Ultra-slim clickable Phase Strip */}
+                          {/* Subtle compact Phase Strip */}
                           <button
                             type="button"
                             onClick={() => openNewNoteModal(isoDate, phase.key)}
                             className="w-full flex items-center justify-between gap-1 text-left group leading-none py-[1px]"
                           >
                             <span
-                              className={`font-bold text-[#0B534D] group-hover:text-[#0F766E] truncate ${
-                                isDense4 ? 'text-[9.5px]' : 'text-[10.5px]'
+                              className={`text-[8.5px] sm:text-[9px] font-semibold tracking-tight leading-none text-[var(--todo-text-muted)] group-hover:text-[var(--todo-text)] truncate ${
+                                hasNotes ? 'opacity-75' : ''
                               }`}
                             >
                               {phase.title}
                             </span>
                             <Plus
-                              className="h-3 w-3 shrink-0 text-[#49A197] group-hover:text-[#0F766E]"
+                              className="h-2.5 w-2.5 shrink-0 text-[var(--todo-text-muted)] opacity-65 group-hover:opacity-100 group-hover:text-[var(--todo-accent)]"
                               aria-hidden="true"
                             />
                           </button>
 
-                          {/* Ultra-slim Note Rows inside this Phase + Reorder Gaps + Merge Targets */}
-                          {slotItems.length > 0 && (
-                            <div className="mt-0.5 space-y-0.5">
+                          {/* Readable Full-Size Note Rows matching Da Fare */}
+                          {hasNotes && (
+                            <div className="mt-1 space-y-1">
                               {slotItems.map((item) => {
                                 const isDragged = draggedOrgId === item.id;
                                 const isInsertBefore =
@@ -1002,7 +1003,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                         <div
                                           className={`w-full rounded-full transition-all ${
                                             isInsertBefore
-                                              ? 'h-[3px] bg-[#0E8A7E]'
+                                              ? 'h-[3px] bg-[var(--todo-accent)]'
                                               : 'h-[1px] bg-transparent'
                                           }`}
                                         />
@@ -1041,12 +1042,10 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                         resetOrgDragState();
                                       }}
                                       onDragEnd={resetOrgDragState}
-                                      className={`flex items-center gap-1 rounded border px-1.5 transition-all ${
-                                        isDense4 ? 'py-[4px] min-h-[27px]' : 'py-[5.5px] min-h-[30px]'
-                                      } ${
+                                      className={`flex items-center gap-1.5 rounded-lg border px-2 py-[6px] min-h-[34px] transition-all ${
                                         isMergeTarget
-                                          ? 'border-[#0B5B53] bg-[#C4EFE6] ring-2 ring-[#0E8A7E]'
-                                          : 'border-[#9BDCD1] bg-[#EDFBF8]/95 hover:border-[#0E8A7E]'
+                                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-2 ring-[var(--todo-accent)]'
+                                          : 'border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)]'
                                       } ${isDragged ? 'opacity-45' : ''}`}
                                     >
                                       <button
@@ -1064,9 +1063,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                           pointerDragRef.current = { id: item.id, active: true };
                                           setDraggedOrgId(item.id);
                                         }}
-                                        className="touch-none h-5 w-4 flex items-center justify-center rounded cursor-grab active:cursor-grabbing shrink-0 text-[#3D8B83]"
+                                        className="touch-none h-6 w-4.5 flex items-center justify-center rounded cursor-grab active:cursor-grabbing shrink-0 text-[var(--todo-text-muted)] hover:text-[var(--todo-text)]"
                                       >
-                                        <GripVertical className="h-3 w-3" aria-hidden="true" />
+                                        <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
                                       </button>
 
                                       <button
@@ -1079,34 +1078,29 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                           });
                                         }}
                                         aria-label={item.done ? 'Da fare' : 'Completata'}
-                                        className="shrink-0 text-[#0F766E]"
+                                        className="h-5 w-5 flex items-center justify-center rounded shrink-0 text-[var(--todo-accent)]"
                                       >
                                         {item.done ? (
-                                          <CheckCircle2 className="h-3.5 w-3.5 text-[#0F766E]" />
+                                          <CheckCircle2 className="h-4 w-4 text-[var(--todo-accent)]" />
                                         ) : (
-                                          <Circle className="h-3.5 w-3.5 text-[#68B9AD]" />
+                                          <Circle className="h-4 w-4 text-[var(--todo-text-muted)] opacity-60" />
                                         )}
                                       </button>
 
                                       <button
                                         type="button"
                                         onClick={() => setSelectedOrgId(item.id)}
-                                        className="min-w-0 flex-1 text-left flex items-center gap-1.5"
+                                        className="min-w-0 flex-1 text-left flex items-center gap-1.5 py-[1px]"
                                       >
                                         <CatEmoticonIcon
                                           emoticonId={catId}
                                           text={item.text}
-                                          sizeClass="h-[18px] w-[18px]"
+                                          variant="fullFace"
+                                          sizeClass="h-[22px] w-[22px]"
                                         />
                                         <span
-                                          className={`block font-medium text-[#072C29] leading-[1.2] ${
+                                          className={`block text-xs font-medium text-[var(--todo-text)] leading-[1.25] break-words ${
                                             item.done ? 'line-through opacity-55' : ''
-                                          } ${
-                                            isDense4
-                                              ? 'text-[10.5px] line-clamp-1'
-                                              : isDense3
-                                                ? 'text-[11px] line-clamp-2'
-                                                : 'text-xs'
                                           }`}
                                         >
                                           {item.text}
@@ -1114,7 +1108,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                       </button>
 
                                       {isMergeTarget && (
-                                        <span className="rounded bg-[#0B5B53] px-1 py-[0.5px] text-[9px] font-bold text-white shrink-0">
+                                        <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
                                           Unisci
                                         </span>
                                       )}
@@ -1157,7 +1151,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                   <div
                                     className={`w-full rounded-full transition-all ${
                                       isPhaseEndInsert
-                                        ? 'h-[3px] bg-[#0E8A7E]'
+                                        ? 'h-[3px] bg-[var(--todo-accent)]'
                                         : 'h-[1px] bg-transparent'
                                     }`}
                                   />
@@ -1176,7 +1170,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             <button
               type="button"
               onClick={() => setTotalDaysCount((c) => c + 7)}
-              className="w-full min-h-[36px] rounded-xl border border-dashed border-[#74C4B6] bg-[#E5F9F4] text-xs font-semibold text-[#0B4F49] hover:bg-[#D4F3EC]"
+              className="w-full min-h-[36px] rounded-xl border border-dashed border-[var(--todo-shell-border)] bg-[var(--todo-surface-alt)] text-xs font-semibold text-[var(--todo-text)] hover:opacity-85"
             >
               Carica altri 7 giorni
             </button>
@@ -1208,22 +1202,22 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         className="space-y-2.5"
       />
 
-      {/* Compact New Note Modal (>50% smaller, no instructions, only "Nuova nota") */}
+      {/* Compact New Note Modal */}
       {newModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#042422]/45 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="org-new-modal-title"
           onClick={closeNewNoteModal}
         >
           <div
-            className="w-full max-w-[320px] rounded-2xl bg-[#F7FEFC] border border-[#7ECBBF] p-3.5 shadow-2xl space-y-2.5"
+            className="w-full max-w-[330px] rounded-2xl bg-[var(--todo-card)] border border-[var(--todo-card-border)] p-3.5 shadow-2xl space-y-2.5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 min-w-0">
-                <h3 id="org-new-modal-title" className="text-xs font-bold text-[#083B37]">
+                <h3 id="org-new-modal-title" className="text-xs font-bold text-[var(--todo-text)]">
                   Nuova nota
                 </h3>
                 {newModalTab === 'create' && (
@@ -1233,11 +1227,11 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     aria-expanded={showNewCatPicker}
                     className={`inline-flex items-center gap-1 rounded-lg border px-1.5 py-0.5 text-[10px] font-semibold transition-colors ${
                       showNewCatPicker
-                        ? 'border-[#0F766E] bg-[#C4EFE6] text-[#083B37]'
-                        : 'border-[#7ECBBF] bg-[#E5F9F4] text-[#0B4F49] hover:bg-[#D4F3EC]'
+                        ? 'border-[var(--todo-accent)] bg-[var(--todo-accent-soft)] text-[var(--todo-text)]'
+                        : 'border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-text)] hover:opacity-85'
                     }`}
                   >
-                    <CatEmoticonIcon emoticonId={effectiveNewCat} sizeClass="h-4 w-4" />
+                    <CatEmoticonIcon emoticonId={effectiveNewCat} variant="fullFace" sizeClass="h-4 w-4" />
                     <span>{CAT_EMOTICON_MAP[effectiveNewCat].label}</span>
                   </button>
                 )}
@@ -1246,7 +1240,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 type="button"
                 onClick={closeNewNoteModal}
                 aria-label="Chiudi"
-                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[#9BDCD1] text-[#0B534D] hover:bg-[#D8F4EE] shrink-0"
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[var(--todo-note-border)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] shrink-0"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1268,12 +1262,12 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             )}
 
             {/* Compact Day & Phase */}
-            <div className="rounded-xl border border-[#9BDCD1] bg-[#EDFBF8] p-2 space-y-1.5">
+            <div className="rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] p-2 space-y-1.5">
               <input
                 type="date"
                 value={newModalDate}
                 onChange={(e) => setNewModalDate(e.target.value)}
-                className="w-full min-h-[30px] rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-2 py-0.5 text-[11px] text-[#072C29]"
+                className="w-full min-h-[30px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-0.5 text-[11px] text-[var(--todo-text)]"
               />
               <div className="grid grid-cols-2 gap-1">
                 {DAY_PHASES.map((p) => (
@@ -1283,8 +1277,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     onClick={() => setNewModalPhase(p.key)}
                     className={`min-h-[28px] rounded-lg border px-1.5 py-0.5 text-[10.5px] font-semibold transition-colors ${
                       newModalPhase === p.key
-                        ? 'border-[#08443E] bg-[#0B5B53] text-white'
-                        : 'border-[#7ECBBF] bg-[#F7FEFC] text-[#0B4F49] hover:bg-[#D8F4EE]'
+                        ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
+                        : 'border-[var(--todo-chip-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
                     }`}
                   >
                     {p.title}
@@ -1294,14 +1288,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             </div>
 
             {/* Mode Switch */}
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-[#D4F3EC] p-0.5">
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--todo-surface-alt)] p-0.5">
               <button
                 type="button"
                 onClick={() => setNewModalTab('create')}
                 className={`min-h-[28px] rounded-md px-2 text-[11px] font-semibold transition-colors ${
                   newModalTab === 'create'
-                    ? 'bg-[#0B5B53] text-white shadow-xs'
-                    : 'text-[#0B534D]'
+                    ? 'bg-[var(--todo-accent-dark)] text-white shadow-xs'
+                    : 'text-[var(--todo-text-muted)]'
                 }`}
               >
                 Nuova
@@ -1311,8 +1305,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 onClick={() => setNewModalTab('from_todo')}
                 className={`min-h-[28px] inline-flex items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold transition-colors ${
                   newModalTab === 'from_todo'
-                    ? 'bg-[#0B5B53] text-white shadow-xs'
-                    : 'text-[#0B534D]'
+                    ? 'bg-[var(--todo-accent-dark)] text-white shadow-xs'
+                    : 'text-[var(--todo-text-muted)]'
                 }`}
               >
                 <ListTodo className="h-3 w-3" aria-hidden="true" />
@@ -1332,7 +1326,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                         if (newModalError) setNewModalError(null);
                       }}
                       placeholder="Scrivi nota..."
-                      className="w-full rounded-xl border border-[#7ECBBF] bg-[#EDFBF8] p-2 text-xs text-[#072C29] placeholder:text-[#4F928B] focus:border-[#0E8A7E] focus:bg-[#F7FEFC] focus:outline-none"
+                      className="w-full rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] p-2 text-xs text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/60 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
                     />
 
                     <div className="flex items-center gap-1.5">
@@ -1344,12 +1338,12 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                           setNewModalError(null);
                           await startRecording();
                         }}
-                        className="min-h-[34px] inline-flex items-center justify-center gap-1 rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] px-2.5 py-1 text-[11px] font-semibold text-[#083B37] hover:bg-[#D4F3EC] disabled:opacity-50"
+                        className="min-h-[34px] inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] px-2.5 py-1 text-[11px] font-semibold text-[var(--todo-text)] hover:opacity-85 disabled:opacity-50"
                       >
                         {isTranscribing ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Mic className="h-3.5 w-3.5 text-[#0F766E]" />
+                          <Mic className="h-3.5 w-3.5 text-[var(--todo-accent)]" />
                         )}
                         <span>{isTranscribing ? 'Trascrivo...' : 'Voce'}</span>
                       </button>
@@ -1357,7 +1351,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                       <button
                         type="submit"
                         disabled={isTranscribing}
-                        className="flex-1 min-h-[34px] inline-flex items-center justify-center gap-1 rounded-lg bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] px-3 py-1 text-[11px] font-semibold text-white hover:from-[#0C786E] hover:to-[#08443E] disabled:opacity-50"
+                        className="flex-1 min-h-[34px] inline-flex items-center justify-center gap-1 rounded-lg bg-gradient-to-b from-[var(--todo-accent)] to-[var(--todo-accent-dark)] px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
                       >
                         <Send className="h-3 w-3" />
                         Inserisci
@@ -1365,7 +1359,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     </div>
                   </form>
                 ) : (
-                  <div className="rounded-xl border border-[#74C4B6] bg-[#062E2B] text-white p-2.5 space-y-2">
+                  <div className="rounded-xl border border-[var(--todo-shell-border)] bg-[#062E2B] text-white p-2.5 space-y-2">
                     <div className="flex items-center justify-between text-[11px] font-semibold">
                       <span className="text-[#99F6E4]">
                         {DAY_PHASE_MAP[newModalPhase].title}
@@ -1404,25 +1398,25 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 )}
 
                 {(newModalError || micError) && (
-                  <p className="text-[11px] font-medium text-rose-700">
+                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
                     {newModalError || micError}
                   </p>
                 )}
               </div>
             ) : (
               <div className="space-y-2">
-                <label className="flex items-center gap-1.5 rounded-lg border border-[#9BDCD1] bg-[#EDFBF8] px-2 py-1 text-[11px] font-medium text-[#083B37] cursor-pointer">
+                <label className="flex items-center gap-1.5 rounded-lg border border-[var(--todo-note-border)] bg-[var(--todo-surface)] px-2 py-1 text-[11px] font-medium text-[var(--todo-text)] cursor-pointer">
                   <input
                     type="checkbox"
                     checked={removePickedTodo}
                     onChange={(e) => setRemovePickedTodo(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-[#0F766E] rounded"
+                    className="h-3.5 w-3.5 accent-[var(--todo-accent)] rounded"
                   />
                   <span>Sposta (rimuovi da «Da Fare»)</span>
                 </label>
 
                 {todoItems.length === 0 ? (
-                  <p className="py-4 text-center text-[11px] text-[#0E645D]">
+                  <p className="py-4 text-center text-[11px] text-[var(--todo-text-muted)]">
                     Nessuna nota in «Da Fare».
                   </p>
                 ) : (
@@ -1434,7 +1428,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                       if (blkItems.length === 0) return null;
                       return (
                         <div key={blk.key} className="space-y-0.5">
-                          <p className="text-[10px] font-bold uppercase tracking-wide text-[#0E645D]">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-[var(--todo-text-muted)]">
                             {blk.title}
                           </p>
                           <div className="space-y-0.5">
@@ -1451,18 +1445,19 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                   );
                                   setNewModalOpen(false);
                                 }}
-                                className="w-full min-h-[28px] flex items-center justify-between gap-1.5 rounded-lg border border-[#9BDCD1] bg-[#F7FEFC] px-2 py-0.5 text-left hover:border-[#0E8A7E]"
+                                className="w-full min-h-[28px] flex items-center justify-between gap-1.5 rounded-lg border border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] px-2 py-0.5 text-left hover:border-[var(--todo-accent)]"
                               >
-                                <span className="inline-flex items-center gap-1.5 min-w-0 text-[11px] font-medium text-[#072C29]">
+                                <span className="inline-flex items-center gap-1.5 min-w-0 text-[11px] font-medium text-[var(--todo-text)]">
                                   <CatEmoticonIcon
                                     emoticonId={todo.emoji}
                                     text={todo.text}
                                     blockHint={todo.block}
+                                    variant="fullFace"
                                     sizeClass="h-4 w-4"
                                   />
                                   <span className="truncate">{todo.text}</span>
                                 </span>
-                                <span className="text-[10px] font-semibold text-[#0F766E] shrink-0">
+                                <span className="text-[10px] font-semibold text-[var(--todo-accent)] shrink-0">
                                   +
                                 </span>
                               </button>
@@ -1479,36 +1474,37 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         </div>
       )}
 
-      {/* Compact Edit Existing Note Modal */}
+      {/* Compact Edit Existing Note Modal (Salva saves & auto-closes) */}
       {selectedOrgItem && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#042422]/45 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="org-edit-modal-title"
           onClick={() => setSelectedOrgId(null)}
         >
           <div
-            className="w-full max-w-[320px] rounded-2xl bg-[#F7FEFC] border border-[#7ECBBF] p-3.5 shadow-2xl space-y-2.5"
+            className="w-full max-w-[330px] rounded-2xl bg-[var(--todo-card)] border border-[var(--todo-card-border)] p-3.5 shadow-2xl space-y-2.5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => setShowEditCatPicker((v) => !v)}
-                className="flex items-center gap-1.5 min-w-0 rounded-lg border border-[#9BDCD1] bg-[#EDFBF8] px-2 py-1 hover:border-[#0E8A7E] transition-colors"
+                className="flex items-center gap-1.5 min-w-0 rounded-lg border border-[var(--todo-note-border)] bg-[var(--todo-surface)] px-2 py-1 hover:border-[var(--todo-accent)] transition-colors"
                 title="Cambia emoticon gatto companion"
               >
                 <CatEmoticonIcon
                   emoticonId={selectedOrgItem.emoji}
                   text={selectedOrgItem.text}
+                  variant="fullFace"
                   sizeClass="h-5 w-5"
                 />
-                <h3 id="org-edit-modal-title" className="text-xs font-bold text-[#083B37] truncate">
+                <h3 id="org-edit-modal-title" className="text-xs font-bold text-[var(--todo-text)] truncate">
                   {formatItalianDateShort(selectedOrgItem.date)} ·{' '}
                   {DAY_PHASE_MAP[selectedOrgItem.phase].title}
                 </h3>
-                <span className="text-[10px] font-semibold text-[#0F766E] shrink-0">
+                <span className="text-[10px] font-semibold text-[var(--todo-accent)] shrink-0">
                   Cambia
                 </span>
               </button>
@@ -1516,7 +1512,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 type="button"
                 onClick={() => setSelectedOrgId(null)}
                 aria-label="Chiudi"
-                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[#9BDCD1] text-[#0B534D] hover:bg-[#D8F4EE] shrink-0"
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[var(--todo-note-border)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] shrink-0"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -1536,31 +1532,35 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
               />
             )}
 
-            <div className="flex gap-1.5">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const clean = editDraftText.trim();
+                if (!clean) return;
+                onUpdateOrganizeItem(selectedOrgItem.id, {
+                  text: clean,
+                  updatedAt: new Date().toISOString(),
+                });
+                setSelectedOrgId(null);
+                onNotify('Nota aggiornata');
+              }}
+              className="flex gap-1.5"
+            >
               <input
                 type="text"
                 value={editDraftText}
                 onChange={(e) => setEditDraftText(e.target.value)}
-                className="flex-1 min-h-[34px] rounded-lg border border-[#7ECBBF] bg-[#EDFBF8] px-2.5 py-1 text-xs text-[#072C29] focus:border-[#0E8A7E] focus:bg-[#F7FEFC] focus:outline-none"
+                className="flex-1 min-h-[34px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)] focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
               />
               <button
-                type="button"
-                onClick={() => {
-                  const clean = editDraftText.trim();
-                  if (!clean) return;
-                  onUpdateOrganizeItem(selectedOrgItem.id, {
-                    text: clean,
-                    updatedAt: new Date().toISOString(),
-                  });
-                  onNotify('Nota aggiornata');
-                }}
-                className="min-h-[34px] rounded-lg bg-[#0B5B53] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#08443E] shrink-0"
+                type="submit"
+                className="min-h-[34px] rounded-lg bg-[var(--todo-accent-dark)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90 shrink-0"
               >
                 Salva
               </button>
-            </div>
+            </form>
 
-            <div className="grid grid-cols-1 gap-1.5 rounded-xl border border-[#9BDCD1] bg-[#EDFBF8] p-2">
+            <div className="grid grid-cols-1 gap-1.5 rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] p-2">
               <input
                 type="date"
                 value={selectedOrgItem.date}
@@ -1573,7 +1573,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     null
                   );
                 }}
-                className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-2 py-0.5 text-[#072C29]"
+                className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-0.5 text-[var(--todo-text)]"
               />
               <select
                 value={selectedOrgItem.phase}
@@ -1585,7 +1585,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     null
                   )
                 }
-                className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[#7ECBBF] bg-[#F7FEFC] px-2 py-0.5 text-[#072C29]"
+                className="block w-full max-w-full min-w-0 min-h-[32px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-0.5 text-[var(--todo-text)]"
               >
                 {DAY_PHASES.map((p) => (
                   <option key={p.key} value={p.key}>
@@ -1599,14 +1599,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
               <button
                 type="button"
                 onClick={() => onMoveOrganizeStep(selectedOrgItem.id, -1)}
-                className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] px-2 text-[11px] font-semibold text-[#0B4F49] hover:bg-[#D4F3EC]"
+                className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] px-2 text-[11px] font-semibold text-[var(--todo-text)] hover:opacity-85"
               >
                 <ArrowUp className="h-3 w-3" /> Su
               </button>
               <button
                 type="button"
                 onClick={() => onMoveOrganizeStep(selectedOrgItem.id, 1)}
-                className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[#7ECBBF] bg-[#E5F9F4] px-2 text-[11px] font-semibold text-[#0B4F49] hover:bg-[#D4F3EC]"
+                className="flex-1 min-h-[30px] inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] px-2 text-[11px] font-semibold text-[var(--todo-text)] hover:opacity-85"
               >
                 <ArrowDown className="h-3 w-3" /> Giù
               </button>
@@ -1621,14 +1621,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                   onDeleteOrganizeItem(idToDel);
                   onNotify('Nota eliminata');
                 }}
-                className="min-h-[32px] inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                className="min-h-[32px] inline-flex items-center gap-1 rounded-lg border border-rose-300 dark:border-rose-700/70 bg-rose-50 dark:bg-rose-950/60 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:text-rose-200 hover:opacity-90"
               >
                 <Trash2 className="h-3 w-3" /> Elimina
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedOrgId(null)}
-                className="min-h-[32px] rounded-lg border border-[#9BDCD1] bg-[#F7FEFC] px-3 py-1 text-[11px] font-semibold text-[#0B534D] hover:bg-[#D8F4EE]"
+                className="min-h-[32px] rounded-lg border border-[var(--todo-note-border)] bg-[var(--todo-surface-alt)] px-3 py-1 text-[11px] font-semibold text-[var(--todo-text)] hover:opacity-85"
               >
                 Chiudi
               </button>
@@ -1640,7 +1640,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       {/* Compact Modal: Batch Paste from Clipboard for a Day in Organizza (1 line = 1 note) */}
       {pasteDate && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#042422]/45 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="org-batch-paste-title"
@@ -1659,11 +1659,11 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
           }}
         >
           <div
-            className="w-full max-w-[320px] rounded-2xl bg-[#F7FEFC] border border-[#7ECBBF] p-3.5 shadow-2xl space-y-2.5"
+            className="w-full max-w-[330px] rounded-2xl bg-[var(--todo-card)] border border-[var(--todo-card-border)] p-3.5 shadow-2xl space-y-2.5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2">
-              <h3 id="org-batch-paste-title" className="text-xs font-bold text-[#083B37] truncate">
+              <h3 id="org-batch-paste-title" className="text-xs font-bold text-[var(--todo-text)] truncate">
                 Incolla note · {formatItalianDateShort(pasteDate)}
               </h3>
               <button
@@ -1671,14 +1671,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 disabled={isParsingBatch}
                 onClick={() => setPasteDate(null)}
                 aria-label="Chiudi"
-                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[#9BDCD1] text-[#0B534D] hover:bg-[#D8F4EE] shrink-0"
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[var(--todo-note-border)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] shrink-0"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
 
             {/* Phase Destination Selector */}
-            <div className="grid grid-cols-2 gap-1 rounded-xl border border-[#9BDCD1] bg-[#EDFBF8] p-1.5">
+            <div className="grid grid-cols-2 gap-1 rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] p-1.5">
               {DAY_PHASES.map((p) => (
                 <button
                   key={p.key}
@@ -1687,8 +1687,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                   onClick={() => setPastePhase(p.key)}
                   className={`min-h-[28px] rounded-lg border px-1.5 py-0.5 text-[10.5px] font-semibold transition-colors ${
                     pastePhase === p.key
-                      ? 'border-[#08443E] bg-[#0B5B53] text-white'
-                      : 'border-[#7ECBBF] bg-[#F7FEFC] text-[#0B4F49] hover:bg-[#D8F4EE]'
+                      ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
+                      : 'border-[var(--todo-chip-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
                   }`}
                 >
                   {p.title}
@@ -1700,7 +1700,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
               type="button"
               disabled={isParsingBatch}
               onClick={handlePasteFromClipboard}
-              className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#74C4B6] bg-[#D8F4EE] px-2.5 py-1 text-xs font-semibold text-[#0B4F49] hover:bg-[#BEECE1] disabled:opacity-50"
+              className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--todo-shell-border)] bg-[var(--todo-accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--todo-text)] hover:opacity-85 disabled:opacity-50"
             >
               <ClipboardPaste className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Incolla dagli appunti</span>
@@ -1717,17 +1717,17 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                   if (pasteError) setPasteError(null);
                 }}
                 placeholder={'Riga 1...\nRiga 2...\nRiga 3...'}
-                className="w-full rounded-xl border border-[#7ECBBF] bg-[#EDFBF8] p-2 text-[#072C29] placeholder:text-[#4F928B] focus:border-[#0E8A7E] focus:bg-[#F7FEFC] focus:outline-none"
+                className="w-full rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] p-2 text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/60 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
               />
 
               {pasteError && (
-                <p className="text-[11px] font-medium text-rose-700">{pasteError}</p>
+                <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">{pasteError}</p>
               )}
 
               <button
                 type="submit"
                 disabled={isParsingBatch || !pasteRawText.trim()}
-                className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-[#0E8A7E] to-[#0B5B53] px-3 py-1.5 text-xs font-semibold text-white hover:from-[#0C786E] hover:to-[#08443E] disabled:opacity-50"
+                className="w-full min-h-[34px] inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-[var(--todo-accent)] to-[var(--todo-accent-dark)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
               >
                 {isParsingBatch ? (
                   <>
@@ -1756,7 +1756,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
 
       {/* Floating Drag Guidance Pill */}
       {draggedOrgId && (
-        <div className="fixed bottom-16 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none rounded-full bg-[#083B37] px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg border border-[#74C4B6]/60 whitespace-nowrap max-w-[92vw] truncate">
+        <div className="fixed bottom-16 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none rounded-full bg-[var(--todo-accent-dark)] px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg border border-[var(--todo-shell-border)] whitespace-nowrap max-w-[92vw] truncate">
           {dropTarget?.mergeTargetId
             ? `Rilascia per unire con «${organizeItems.find((o) => o.id === dropTarget.mergeTargetId)?.text || 'nota'}»`
             : dropTarget?.insertBeforeId || dropTarget?.insertEnd

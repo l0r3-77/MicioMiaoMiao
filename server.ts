@@ -514,6 +514,9 @@ function isFailoverEligibleError(err: unknown): boolean {
     msg.includes('429') ||
     msg.includes('500') ||
     msg.includes('504') ||
+    msg.includes('404') ||
+    msg.includes('NOT_FOUND') ||
+    msg.toLowerCase().includes('not found') ||
     msg.includes('UNAVAILABLE') ||
     msg.includes('RESOURCE_EXHAUSTED') ||
     msg.includes('fetch failed') ||
@@ -737,6 +740,46 @@ ${REMINDERS_GUIDE_PROMPT}`,
         if (cfg.backoffMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, cfg.backoffMs));
         }
+      }
+    }
+
+    if (!isModelKnownExhausted('gemini-3.5-transcribe')) {
+      const t0 = Date.now();
+      try {
+        const transcribeResp = await callWithTimeout(
+          () =>
+            ai.models.generateContent({
+              model: 'gemini-3.5-transcribe',
+              contents: {
+                parts: [
+                  audioPart,
+                  {
+                    text: 'Transcribe this audio faithfully in Italian. Reply "[SILENZIO]" only if there is no spoken voice at all.',
+                  },
+                ],
+              },
+            }),
+          90000
+        );
+        const transcript = (transcribeResp.text ?? '').trim();
+        let bullets: string[] = [];
+        let reminders: string[] = [];
+        let suggestedColor: SuggestedColor = inferSuggestedColor(transcript);
+        if (transcript && transcript !== '[SILENZIO]') {
+          try {
+            const synth = await synthesizeMoodBullets(ai, transcript, false);
+            bullets = synth.bullets;
+            reminders = synth.reminders;
+            suggestedColor = synth.suggestedColor;
+          } catch {
+            reminders = extractRemindersFallback(transcript);
+          }
+        }
+        console.log(`[Transcribe gemini-3.5-transcribe] ok in ${Date.now() - t0}ms`);
+        recordSuccessfulGeminiUsage();
+        return { transcript, bullets, reminders, suggestedColor };
+      } catch (transcribeErr) {
+        lastError = transcribeErr;
       }
     }
   } finally {
@@ -1055,10 +1098,12 @@ async function startServer() {
       const cleanMime = normalizeAudioMimeType(mimeType);
       const ai = getGeminiClient();
 
-      const models = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'].filter(
-        (m) => !isModelKnownExhausted(m)
-      );
-      if (models.length === 0) {
+      const todoAttempts: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
+        { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+        { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+      ].filter((a) => !isModelKnownExhausted(a.model));
+
+      if (todoAttempts.length === 0 && isModelKnownExhausted('gemini-3.5-transcribe')) {
         return res.status(429).json({
           error: 'Richieste AI di oggi esaurite: scrivi la nota manualmente.',
           quota: getPublicQuotaSnapshot(),
@@ -1068,12 +1113,12 @@ async function startServer() {
       const catEmoticonIds = CAT_EMOTICON_IDS;
 
       let lastErr: unknown;
-      for (const model of models) {
+      for (const attempt of todoAttempts) {
         try {
           const response = await callWithTimeout(
             () =>
               ai.models.generateContent({
-                model,
+                model: attempt.model,
                 contents: [
                   {
                     role: 'user',
@@ -1086,7 +1131,7 @@ async function startServer() {
                   },
                 ],
                 config: {
-                  thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+                  thinkingConfig: { thinkingLevel: attempt.thinkingLevel },
                   responseMimeType: 'application/json',
                   responseSchema: {
                     type: Type.OBJECT,
@@ -1124,9 +1169,42 @@ async function startServer() {
         } catch (err) {
           lastErr = err;
           if ((err as { status?: number })?.status === 429) {
-            markModelQuotaExhausted(model, err);
+            markModelQuotaExhausted(attempt.model, err);
           }
           if (!isFailoverEligibleError(err)) break;
+        }
+      }
+
+      if (!isModelKnownExhausted('gemini-3.5-transcribe')) {
+        try {
+          const transcribeResp = await callWithTimeout(
+            () =>
+              ai.models.generateContent({
+                model: 'gemini-3.5-transcribe',
+                contents: {
+                  parts: [
+                    { inlineData: { mimeType: cleanMime, data: audioBase64 } },
+                    { text: 'Transcribe this audio in Italian. Reply "[SILENZIO]" if empty.' },
+                  ],
+                },
+              }),
+            45000
+          );
+          const text = (transcribeResp.text ?? '').trim();
+          if (!text || text === '[SILENZIO]') {
+            return res.status(422).json({
+              error: 'Nessuna parola rilevata nella registrazione.',
+              quota: getPublicQuotaSnapshot(),
+            });
+          }
+          recordSuccessfulGeminiUsage();
+          return res.json({
+            text,
+            emoji: 'cat_note',
+            quota: getPublicQuotaSnapshot(),
+          });
+        } catch (transcribeErr) {
+          lastErr = transcribeErr;
         }
       }
       throw lastErr;
@@ -1154,10 +1232,11 @@ async function startServer() {
     }
 
     try {
-      const models = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'].filter(
-        (m) => !isModelKnownExhausted(m)
-      );
-      if (models.length === 0) {
+      const batchAttempts: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
+        { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+        { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+      ].filter((a) => !isModelKnownExhausted(a.model));
+      if (batchAttempts.length === 0) {
         return res.json({
           items: fallbackLines.map((text) => ({ text, emoji: '' })),
           usedFallback: true,
@@ -1170,10 +1249,11 @@ async function startServer() {
       const numberedLines = fallbackLines.map((line, i) => `${i}: ${line}`).join('\n');
 
       const ai = getGeminiClient();
+      const chosen = batchAttempts[0];
       const response = await callWithTimeout(
         () =>
           ai.models.generateContent({
-            model: models[0],
+            model: chosen.model,
             contents: `Associa a ciascuna delle ${fallbackLines.length} righe numerate l'ID icona del gatto MicioMiao più inerente al testo (es. benzina/gpl/rifornimento -> "cat_fuel", barber/barbiere/capelli -> "cat_barber", auto/revisione -> "cat_car", doccia -> "cat_shower", pulizie/bucato -> "cat_clean", bollette/pagamenti -> "cat_bills", cane/gatto -> "cat_pet", spesa/acquisti -> "cat_shop", dottore/salute -> "cat_health", caffè -> "cat_coffee", cibo/cena -> "cat_food", chiamare -> "cat_call", lavoro -> "cat_work", sport -> "cat_sport").
 REGOLA ASSOLUTA: ogni riga numerata DEVE restare UNA SOLA nota. Anche se su una stessa riga ci sono più attività (separate da virgole, "e", ";", "/" o trattini), NON dividerle MAI su più note: mantieni tutte le attività di quella riga in una riga sola. Restituisci esattamente un elemento per ogni indice da 0 a ${fallbackLines.length - 1}.
 
@@ -1182,7 +1262,7 @@ Righe:
 ${numberedLines.slice(0, 6000)}
 """`,
             config: {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+              thinkingConfig: { thinkingLevel: chosen.thinkingLevel },
               responseMimeType: 'application/json',
               responseSchema: {
                 type: Type.OBJECT,
@@ -1241,6 +1321,10 @@ ${numberedLines.slice(0, 6000)}
         quota: getPublicQuotaSnapshot(),
       });
     }
+  });
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Endpoint API non trovato sul server.' });
   });
 
   if (process.env.NODE_ENV !== 'production') {

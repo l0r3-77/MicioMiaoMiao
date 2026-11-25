@@ -1,14 +1,68 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+:root {
+  color-scheme: light;
+  --app-bg: #FAF7F0;
+  --app-bg-soft: #F3EFE4;
+  --app-header-bg: rgba(250, 247, 240, 0.92);
+  --app-card: #FFFFFF;
+  --app-card-alt: #FAF7F0;
+  --app-border: rgba(28, 25, 23, 0.12);
+  --app-border-soft: #E7E5E4;
+  --app-text: #1C1917;
+  --app-text-muted: #57534E;
+  --app-text-subtle: #78716C;
+  --app-accent: #7E22CE;
+  --app-accent-hover: #6B21A8;
+  --app-accent-soft: #F3E8FF;
+  --app-accent-soft-border: #E9D5FF;
+  --app-accent-text: #6B21A8;
+  --app-btn-bg: #1C1917;
+  --app-btn-bg-hover: #292524;
+  --app-btn-text: #FFFFFF;
+  --app-companion-bg: #FAF5E8;
+  --app-companion-border: rgba(216, 180, 254, 0.8);
+  --app-divider: #F5F5F4;
+
+  --todo-shell-from: #CCF3EC;
+  --todo-shell-via: #E5FAF6;
+  --todo-shell-to: #B7ECE2;
+  --todo-shell-border: #74C4B6;
+  --todo-card: #F7FEFC;
+  --todo-card-border: #7ECBBF;
+  --todo-surface: #EDFBF8;
+  --todo-surface-alt: #E5F9F4;
+  --todo-day-bg: #E1F6F1;
+  --todo-day-today-bg: #CEEFE8;
+  --todo-day-today-border: #0E8A7E;
+  --todo-phase-populated-bg: #F4FCFA;
+  --todo-phase-border: #B6E6DD;
+  --todo-note-bg: #F9FEFD;
+  --todo-note-border: #9BDCD1;
+  --todo-accent: #0E8A7E;
+  --todo-accent-dark: #0B5B53;
+  --todo-accent-soft: #D8F4EE;
+  --todo-text: #083B37;
+  --todo-text-muted: #0E645D;
+  --todo-chip-border: #7ECBBF;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 @layer base {
   html,
   body {
     font-family: var(--font-sans);
+    background-color: var(--app-bg);
+    color: var(--app-text);
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -24,7 +78,7 @@
 }
 
 /* Prevent iOS Safari / mobile browsers from zooming the page when focusing text inputs */
-input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
 textarea,
 select {
   font-size: 16px !important;
@@ -102,4 +156,3 @@ input[type="time"]::-webkit-date-and-time-value {
     color: #0f172a !important;
   }
 }
-

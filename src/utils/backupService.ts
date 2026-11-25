@@ -1,6 +1,6 @@
 import type { OrganizeNoteItem, TodoNoteItem } from '../types/dailyTodo';
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
-import type { AppSettings } from './appSettings';
+import { sanitizeAppSettings, type AppSettings } from './appSettings';
 import { getAudioClip, saveAudioClip } from './audioStorage';
 import {
   DAY_PHASE_MAP,
@@ -385,34 +385,10 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
     ? sanitizeOrganizeItems(record.organizeItems)
     : undefined;
 
-  const parsedSettings =
+  const settings: AppSettings | undefined =
     record.settings && typeof record.settings === 'object'
-      ? (record.settings as Partial<AppSettings> & { autoNightlyBackupEnabled?: boolean })
+      ? sanitizeAppSettings(record.settings)
       : undefined;
-  const settings: AppSettings | undefined = parsedSettings
-    ? {
-        autoExtractReminders:
-          typeof parsedSettings.autoExtractReminders === 'boolean'
-            ? parsedSettings.autoExtractReminders
-            : true,
-        defaultAgendaZoom:
-          parsedSettings.defaultAgendaZoom === 'full' ||
-          parsedSettings.defaultAgendaZoom === 'sensations' ||
-          parsedSettings.defaultAgendaZoom === 'overview'
-            ? parsedSettings.defaultAgendaZoom
-            : 'full',
-        includeAudioInBackup:
-          typeof parsedSettings.includeAudioInBackup === 'boolean'
-            ? parsedSettings.includeAudioInBackup
-            : true,
-        autoBackupOnOpenClose:
-          typeof parsedSettings.autoBackupOnOpenClose === 'boolean'
-            ? parsedSettings.autoBackupOnOpenClose
-            : typeof parsedSettings.autoNightlyBackupEnabled === 'boolean'
-              ? parsedSettings.autoNightlyBackupEnabled
-              : true,
-      }
-    : undefined;
 
   const statsPrefs =
     record.statsPrefs && typeof record.statsPrefs === 'object'

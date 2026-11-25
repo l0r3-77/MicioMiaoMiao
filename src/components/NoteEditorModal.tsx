@@ -15,7 +15,9 @@ import {
 } from 'lucide-react';
 import { blobToBase64 } from '../hooks/useVoiceRecorder';
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
+import { parseApiJsonSafe } from '../utils/apiError';
 import { getAudioClip } from '../utils/audioStorage';
+import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import { formatBytes, formatDuration, formatRecordedDateTime } from '../utils/dateUtils';
 import {
   NOTE_COLOR_LIST,
@@ -108,25 +110,19 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     if (!safeTranscript) return;
     setIsSynthesizing(true);
     setAiError(null);
+    const releaseKeepAlive = startBackgroundSession('Analisi sensazioni in corso');
     try {
       const res = await fetch('/api/notes/summarize-mood', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: safeTranscript, isDailyOverview: false }),
       });
-      const raw = await res.text();
-      let data: {
+      const data = await parseApiJsonSafe<{
         bullets?: unknown;
         reminders?: unknown;
         suggestedColor?: unknown;
         quota?: unknown;
-        error?: string;
-      } = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { error: raw };
-      }
+      }>(res);
       if (data?.quota) {
         publishQuotaSnapshot(data.quota);
       }
@@ -153,6 +149,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'Errore nella sintesi.');
     } finally {
+      releaseKeepAlive();
       setIsSynthesizing(false);
     }
   };
@@ -161,6 +158,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     if (!audioBlob) return;
     setIsTranscribing(true);
     setAiError(null);
+    const releaseKeepAlive = startBackgroundSession('Trascrizione audio in corso');
     try {
       const base64 = await blobToBase64(audioBlob);
       const res = await fetch('/api/notes/transcribe', {
@@ -174,20 +172,13 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
           recordedAt: entry.audioMetadata?.recordedAt || entry.createdAt,
         }),
       });
-      const raw = await res.text();
-      let data: {
+      const data = await parseApiJsonSafe<{
         transcript?: string;
         bullets?: unknown;
         reminders?: unknown;
         suggestedColor?: unknown;
         quota?: unknown;
-        error?: string;
-      } = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { error: raw };
-      }
+      }>(res);
       if (data?.quota) {
         publishQuotaSnapshot(data.quota);
       }
@@ -220,6 +211,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'Errore nella trascrizione.');
     } finally {
+      releaseKeepAlive();
       setIsTranscribing(false);
     }
   };
@@ -252,26 +244,26 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[92dvh] w-full sm:max-w-2xl flex-col rounded-t-3xl sm:rounded-3xl bg-white shadow-2xl overflow-hidden border border-stone-900/10"
+        className="flex max-h-[92dvh] w-full sm:max-w-2xl flex-col rounded-t-3xl sm:rounded-3xl bg-[var(--app-card)] text-[var(--app-text)] shadow-2xl overflow-hidden border border-[var(--app-border)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="pt-3 pb-1 sm:hidden flex justify-center shrink-0">
-          <div className="h-1.5 w-10 rounded-full bg-stone-300" />
+          <div className="h-1.5 w-10 rounded-full bg-[var(--app-border-soft)]" />
         </div>
 
         {/* Modal Header */}
-        <div className="flex items-center justify-between gap-3 border-b border-stone-100 px-5 py-3.5 shrink-0 bg-[#FAF7F0]/70">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--app-divider)] px-5 py-3.5 shrink-0 bg-[var(--app-card-alt)]">
           <div className="flex items-center gap-3 min-w-0">
             <CatIllustration
               src={modalNeko.src}
               alt={modalNeko.alt}
-              className="h-11 w-11 rounded-2xl object-cover border-2 border-stone-900/15 bg-[#FAF5E8] shrink-0"
+              className="h-11 w-11 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
             />
             <span
               className={`h-3 w-3 rounded-full border shrink-0 ${activeColorMeta.swatchClass}`}
               aria-hidden="true"
             />
-            <h2 id="editor-modal-title" className="text-base font-bold text-stone-900 truncate">
+            <h2 id="editor-modal-title" className="text-base font-bold text-[var(--app-text)] truncate">
               Modifica appunto · {dailyNote.title}
             </h2>
           </div>
@@ -280,7 +272,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
             type="button"
             onClick={onClose}
             aria-label="Chiudi editor"
-            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--app-text-subtle)] hover:bg-[var(--app-card)] hover:text-[var(--app-text)]"
           >
             <X className="h-5 w-5" />
           </button>
@@ -295,28 +287,28 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
           {/* Date & Time */}
           <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] gap-2.5">
             <label className="block min-w-0">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-stone-600 mb-1.5">
-                <Calendar className="h-3.5 w-3.5 text-purple-600 shrink-0" aria-hidden="true" />
+              <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--app-text-muted)] mb-1.5">
+                <Calendar className="h-3.5 w-3.5 text-[var(--app-accent)] shrink-0" aria-hidden="true" />
                 Giorno nota
               </span>
               <input
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="block w-full max-w-full min-w-0 min-h-[44px] rounded-xl border border-stone-200 bg-[#FAF7F0] px-2.5 py-2 font-sans text-stone-900 tabular-nums focus:border-purple-500 focus:bg-white focus:outline-none"
+                className="block w-full max-w-full min-w-0 min-h-[44px] rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] px-2.5 py-2 font-sans text-[var(--app-text)] tabular-nums focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
               />
             </label>
 
             <label className="block min-w-0">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-stone-600 mb-1.5">
-                <Clock className="h-3.5 w-3.5 text-purple-600 shrink-0" aria-hidden="true" />
+              <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--app-text-muted)] mb-1.5">
+                <Clock className="h-3.5 w-3.5 text-[var(--app-accent)] shrink-0" aria-hidden="true" />
                 Orario
               </span>
               <input
                 type="time"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
-                className="block w-full max-w-full min-w-0 min-h-[44px] rounded-xl border border-stone-200 bg-[#FAF7F0] px-2.5 py-2 font-sans text-stone-900 tabular-nums focus:border-purple-500 focus:bg-white focus:outline-none"
+                className="block w-full max-w-full min-w-0 min-h-[44px] rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] px-2.5 py-2 font-sans text-[var(--app-text)] tabular-nums focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
               />
             </label>
           </div>
@@ -324,15 +316,15 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
           {/* Per-Entry Highlight Color Selector (5 colors + AI suggest) */}
           <div>
             <div className="flex items-center justify-between gap-2 mb-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-stone-600">
-                <Highlighter className="h-3.5 w-3.5 text-purple-600" aria-hidden="true" />
+              <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--app-text-muted)]">
+                <Highlighter className="h-3.5 w-3.5 text-[var(--app-accent)]" aria-hidden="true" />
                 Colore sensazione
               </span>
               <button
                 type="button"
                 disabled={isSynthesizing || !(transcript || '').trim()}
                 onClick={() => handleRegenerateMoodBullets(true)}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-purple-700 hover:underline disabled:opacity-40"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--app-accent)] hover:underline disabled:opacity-40"
               >
                 <Sparkles className="h-3 w-3" aria-hidden="true" />
                 Ricalcola colore con AI
@@ -349,8 +341,8 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                     aria-pressed={selected}
                     className={`min-h-[44px] flex items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition-all ${
                       selected
-                        ? 'border-stone-900 bg-stone-900 text-white'
-                        : 'border-stone-200 bg-white text-stone-700 hover:border-purple-300'
+                        ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                        : 'border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
                     }`}
                   >
                     <span
@@ -362,14 +354,14 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                 );
               })}
             </div>
-            <p className="mt-1.5 text-[11px] text-stone-500">
-              Attuale: <strong className="text-stone-800">{activeColorMeta.label}</strong> ({activeColorMeta.valenceLabel})
+            <p className="mt-1.5 text-[11px] text-[var(--app-text-subtle)]">
+              Attuale: <strong className="text-[var(--app-text)]">{activeColorMeta.label}</strong> ({activeColorMeta.valenceLabel})
             </p>
           </div>
 
           {/* Highlighted Transcript Textarea */}
           <div>
-            <label htmlFor="entry-transcript" className="block text-xs font-medium text-stone-600 mb-1.5">
+            <label htmlFor="entry-transcript" className="block text-xs font-medium text-[var(--app-text-muted)] mb-1.5">
               Testo dell’appunto
             </label>
             <textarea
@@ -378,14 +370,14 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
               placeholder="Scrivi o modifica il testo dell'appunto..."
-              className={`w-full rounded-xl border border-stone-200 p-3.5 text-sm leading-relaxed placeholder:text-current/55 focus:border-purple-500 focus:outline-none ${activeColorMeta.highlightClass}`}
+              className={`w-full rounded-xl border border-[var(--app-border-soft)] p-3.5 text-sm leading-relaxed placeholder:text-current/55 focus:border-[var(--app-accent)] focus:outline-none ${activeColorMeta.highlightClass}`}
             />
           </div>
 
           {/* Mood / Stress / Sensations Bullet Synthesis */}
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <span className="text-xs font-medium text-stone-600">
+              <span className="text-xs font-medium text-[var(--app-text-muted)]">
                 Sintesi sensazioni, stress e stati d’animo
               </span>
               <div className="flex items-center gap-1">
@@ -393,7 +385,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                   type="button"
                   disabled={isSynthesizing || !(transcript || '').trim()}
                   onClick={() => handleRegenerateMoodBullets(true)}
-                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 transition-colors"
+                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-50 transition-colors"
                 >
                   {isSynthesizing ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -405,7 +397,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                 <button
                   type="button"
                   onClick={handleAddBullet}
-                  className="inline-flex min-h-[36px] items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-purple-800 hover:bg-purple-50 transition-colors"
+                  className="inline-flex min-h-[36px] items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--app-accent-text)] hover:bg-[var(--app-accent-soft)] transition-colors"
                 >
                   <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                   Aggiungi
@@ -414,7 +406,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
             </div>
 
             {bullets.length === 0 ? (
-              <p className="text-xs text-stone-400">
+              <p className="text-xs text-[var(--app-text-subtle)]">
                 Nessun punto di sintesi. Premi “Sintetizza” o “Aggiungi” per annotare stress, focus o bisogni.
               </p>
             ) : (
@@ -422,7 +414,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                 {bullets.map((bullet, idx) => (
                   <div key={idx} className="flex items-center gap-2">
                     <span
-                      className="h-1.5 w-1.5 rounded-full bg-purple-400 shrink-0"
+                      className="h-1.5 w-1.5 rounded-full bg-[var(--app-accent)] shrink-0"
                       aria-hidden="true"
                     />
                     <input
@@ -430,13 +422,13 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                       value={bullet}
                       onChange={(e) => handleBulletChange(idx, e.target.value)}
                       placeholder="Es. Stress: alto, Focus: esaurito..."
-                      className="flex-1 min-h-[42px] rounded-xl border border-stone-200 bg-[#FAF7F0] px-3 py-2 text-sm text-stone-900 focus:border-purple-500 focus:bg-white focus:outline-none"
+                      className="flex-1 min-h-[42px] rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] px-3 py-2 text-sm text-[var(--app-text)] focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => handleRemoveBullet(idx)}
                       aria-label={`Rimuovi punto ${idx + 1}`}
-                      className="min-h-[42px] min-w-[42px] flex items-center justify-center rounded-xl text-stone-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                      className="min-h-[42px] min-w-[42px] flex items-center justify-center rounded-xl text-[var(--app-text-subtle)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition-colors"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -449,8 +441,8 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
           {/* Extracted Reminders Section */}
           <div>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-stone-600">
-                <Bell className="h-3.5 w-3.5 text-purple-600" aria-hidden="true" />
+              <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--app-text-muted)]">
+                <Bell className="h-3.5 w-3.5 text-[var(--app-accent)]" aria-hidden="true" />
                 Promemoria trovati in questo appunto
               </span>
               <div className="flex items-center gap-1">
@@ -462,7 +454,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                     )
                   }
                   disabled={!(transcript || '').trim()}
-                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-40 transition-colors"
+                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-40 transition-colors"
                 >
                   <RefreshCw className="h-3 w-3" aria-hidden="true" />
                   Rileva frasi
@@ -470,7 +462,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setReminders((prev) => [...prev, ''])}
-                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-purple-800 hover:bg-purple-50 transition-colors"
+                  className="inline-flex min-h-[34px] items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-[var(--app-accent-text)] hover:bg-[var(--app-accent-soft)] transition-colors"
                 >
                   <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                   Aggiungi
@@ -479,7 +471,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
             </div>
 
             {reminders.length === 0 ? (
-              <p className="text-xs text-stone-400">
+              <p className="text-xs text-[var(--app-text-subtle)]">
                 Nessun promemoria rilevato (es. “potrei fare…”, “forse dovrei…”, “mi sa che se…”).
               </p>
             ) : (
@@ -495,7 +487,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                         )
                       }
                       placeholder="Frase completa da ricordare..."
-                      className="flex-1 rounded-xl border border-stone-200 bg-[#FAF7F0] px-3 py-2 text-xs text-stone-900 leading-relaxed focus:border-purple-500 focus:bg-white focus:outline-none"
+                      className="flex-1 rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] px-3 py-2 text-xs text-[var(--app-text)] leading-relaxed focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
                     />
                     <button
                       type="button"
@@ -503,7 +495,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                         setReminders((prev) => prev.filter((_, i) => i !== idx))
                       }
                       aria-label={`Rimuovi promemoria ${idx + 1}`}
-                      className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-stone-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                      className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--app-text-subtle)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition-colors"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -513,14 +505,14 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
             )}
           </div>
 
-          {aiError && <p className="text-xs text-rose-600">{aiError}</p>}
+          {aiError && <p className="text-xs text-rose-600 dark:text-rose-400">{aiError}</p>}
 
           {/* Audio Metadata & Playback */}
           {entry.audioMetadata && (
-            <div className="rounded-2xl border border-stone-200 bg-[#FAF7F0] p-4 space-y-3">
+            <div className="rounded-2xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-semibold text-stone-800">
-                  <Mic className="h-4 w-4 text-purple-700" aria-hidden="true" />
+                <div className="flex items-center gap-2 text-xs font-semibold text-[var(--app-text)]">
+                  <Mic className="h-4 w-4 text-[var(--app-accent)]" aria-hidden="true" />
                   <span>Metadati registrazione audio</span>
                 </div>
                 {audioBlob && (
@@ -528,7 +520,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                     type="button"
                     disabled={isTranscribing}
                     onClick={handleTranscribeSavedAudio}
-                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 transition-colors"
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[var(--app-border-soft)] bg-[var(--app-card)] px-2.5 py-1 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-50 transition-colors"
                   >
                     {isTranscribing ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -539,22 +531,22 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-stone-600">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-[var(--app-text-muted)]">
                 <div>
-                  <span className="block text-[11px] text-stone-400">Data e ora registrazione</span>
-                  <span className="font-mono text-stone-800 tabular-nums">
+                  <span className="block text-[11px] text-[var(--app-text-subtle)]">Data e ora registrazione</span>
+                  <span className="font-mono text-[var(--app-text)] tabular-nums">
                     {formatRecordedDateTime(entry.audioMetadata.recordedAt)}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-stone-400">Durata</span>
-                  <span className="font-mono text-stone-800 tabular-nums">
+                  <span className="block text-[11px] text-[var(--app-text-subtle)]">Durata</span>
+                  <span className="font-mono text-[var(--app-text)] tabular-nums">
                     {formatDuration(entry.audioMetadata.durationSeconds)}
                   </span>
                 </div>
                 <div>
-                  <span className="block text-[11px] text-stone-400">Formato e dimensione</span>
-                  <span className="font-mono text-stone-800 tabular-nums">
+                  <span className="block text-[11px] text-[var(--app-text-subtle)]">Formato e dimensione</span>
+                  <span className="font-mono text-[var(--app-text)] tabular-nums">
                     {entry.audioMetadata.mimeType.replace('audio/', '').toUpperCase()} ·{' '}
                     {formatBytes(entry.audioMetadata.sizeBytes)}
                   </span>
@@ -568,12 +560,12 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
         </form>
 
         {/* Bottom Action Bar */}
-        <div className="flex items-center justify-between gap-3 border-t border-stone-100 bg-white px-5 py-3.5 pb-safe shrink-0">
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--app-divider)] bg-[var(--app-card)] px-5 py-3.5 pb-safe shrink-0">
           {!confirmDelete ? (
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
+              className="min-h-[44px] inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               Elimina appunto
@@ -590,7 +582,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="min-h-[44px] rounded-xl px-3 py-2 text-xs font-medium text-stone-600 hover:bg-stone-100 transition-colors"
+                className="min-h-[44px] rounded-xl px-3 py-2 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] transition-colors"
               >
                 Annulla
               </button>
@@ -600,7 +592,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
           <button
             type="submit"
             form="entry-editor-form"
-            className="min-h-[44px] inline-flex items-center gap-2 rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-stone-800 transition-colors"
+            className="min-h-[44px] inline-flex items-center gap-2 rounded-xl bg-[var(--app-btn-bg)] px-5 py-2.5 text-sm font-semibold text-[var(--app-btn-text)] hover:bg-[var(--app-btn-bg-hover)] transition-colors"
           >
             <Save className="h-4 w-4" aria-hidden="true" />
             Salva modifiche

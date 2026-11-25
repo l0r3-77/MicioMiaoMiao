@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 
 export interface RecordedAudioResult {
   blob: Blob;
@@ -151,8 +152,13 @@ export function useVoiceRecorder() {
   const rafRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const startedAtRef = useRef<number>(0);
+  const keepAliveReleaseRef = useRef<(() => void) | null>(null);
 
   const cleanup = useCallback(() => {
+    if (keepAliveReleaseRef.current) {
+      keepAliveReleaseRef.current();
+      keepAliveReleaseRef.current = null;
+    }
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
@@ -213,6 +219,10 @@ export function useVoiceRecorder() {
       }
     } catch {
       preCtx = null;
+    }
+
+    if (!keepAliveReleaseRef.current) {
+      keepAliveReleaseRef.current = startBackgroundSession('Registrazione vocale in corso');
     }
 
     try {
