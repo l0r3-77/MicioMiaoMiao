@@ -52,7 +52,7 @@ export default defineConfig(() => {
           skipWaiting: true,
           runtimeCaching: [
             {
-              urlPattern: /^\/api\/.*/i,
+              urlPattern: /\/api\//i,
               handler: 'NetworkOnly',
             },
           ],

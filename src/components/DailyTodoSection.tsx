@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { ListChecks } from 'lucide-react';
 import type {
   DayPhaseKey,
@@ -15,6 +15,18 @@ import { DaFareSubsection } from './DaFareSubsection';
 import { OrganizzaSubsection } from './OrganizzaSubsection';
 
 export type TodoSubTab = 'da_fare' | 'organizza';
+
+export interface DuplicateSourcePayload {
+  text: string;
+  emoji?: string;
+  done: boolean;
+  source: 'voice' | 'text';
+  reminderDate?: string;
+  reminderTime?: string;
+  blockHint?: TodoBlockKey;
+}
+
+const MAX_UNDO_HISTORY = 30;
 
 interface DailyTodoSectionProps {
   subTab: TodoSubTab;
@@ -45,21 +57,60 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
   onSetOrganizeItems,
   onNotify,
 }) => {
+  const [todoUndoStack, setTodoUndoStack] = useState<TodoNoteItem[][]>([]);
+  const [organizeUndoStack, setOrganizeUndoStack] = useState<OrganizeNoteItem[][]>([]);
+
+  const todoItemsRef = useRef(todoItems);
+  todoItemsRef.current = todoItems;
+  const organizeItemsRef = useRef(organizeItems);
+  organizeItemsRef.current = organizeItems;
+
+  const pushTodoUndo = () => {
+    const snapshot = todoItemsRef.current;
+    setTodoUndoStack((prev) => [...prev.slice(-(MAX_UNDO_HISTORY - 1)), snapshot]);
+  };
+
+  const pushOrganizeUndo = () => {
+    const snapshot = organizeItemsRef.current;
+    setOrganizeUndoStack((prev) => [...prev.slice(-(MAX_UNDO_HISTORY - 1)), snapshot]);
+  };
+
+  const handleUndoTodo = () => {
+    if (todoUndoStack.length === 0) return;
+    const previous = todoUndoStack[todoUndoStack.length - 1];
+    setTodoUndoStack((prev) => prev.slice(0, -1));
+    onSetTodoItems(previous);
+    onNotify('Ultima azione annullata in «Da Fare»');
+  };
+
+  const handleUndoOrganize = () => {
+    if (organizeUndoStack.length === 0) return;
+    const previous = organizeUndoStack[organizeUndoStack.length - 1];
+    setOrganizeUndoStack((prev) => prev.slice(0, -1));
+    onSetOrganizeItems(previous);
+    onNotify('Ultima azione annullata in «Organizza»');
+  };
+
   const handleAddTodo = (item: TodoNoteItem) => {
+    pushTodoUndo();
     onSetTodoItems((prev) => [...prev, item]);
   };
 
   const handleAddManyTodos = (items: TodoNoteItem[]) => {
+    if (items.length === 0) return;
+    pushTodoUndo();
     onSetTodoItems((prev) => [...prev, ...items]);
   };
 
   const handleUpdateTodo = (id: string, patch: Partial<TodoNoteItem>) => {
+    pushTodoUndo();
     onSetTodoItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
   };
 
   const handleDeleteTodo = (id: string) => {
+    pushTodoUndo();
     onSetTodoItems((prev) => prev.filter((item) => item.id !== id));
   };
 
@@ -68,10 +119,11 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     targetBlock: TodoBlockKey,
     targetItemId?: string | null
   ) => {
+    if (targetItemId === draggedId) return;
+    pushTodoUndo();
     onSetTodoItems((prev) => {
       const dragged = prev.find((i) => i.id === draggedId);
       if (!dragged) return prev;
-      if (targetItemId === draggedId) return prev;
 
       const nowIso = new Date().toISOString();
       const withoutDragged = prev.filter((i) => i.id !== draggedId);
@@ -114,6 +166,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
 
   const handleMergeTodos = (sourceId: string, targetId: string) => {
     if (!sourceId || !targetId || sourceId === targetId) return;
+    pushTodoUndo();
     const nowIso = new Date().toISOString();
     onSetTodoItems((prev) => {
       const source = prev.find((i) => i.id === sourceId);
@@ -140,7 +193,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
             : i
         );
 
-      // Reindex affected block orders cleanly
       const affectedBlocks = new Set<TodoBlockKey>([source.block, target.block]);
       const untouched = withoutSource.filter((i) => !affectedBlocks.has(i.block));
       const reindexed: TodoNoteItem[] = [];
@@ -157,6 +209,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
   };
 
   const handleMoveTodoStep = (id: string, delta: -1 | 1) => {
+    pushTodoUndo();
     onSetTodoItems((prev) => {
       const target = prev.find((i) => i.id === id);
       if (!target) return prev;
@@ -180,20 +233,25 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
   };
 
   const handleAddOrganizeItem = (item: OrganizeNoteItem) => {
+    pushOrganizeUndo();
     onSetOrganizeItems((prev) => [...prev, item]);
   };
 
   const handleAddManyOrganizeItems = (items: OrganizeNoteItem[]) => {
+    if (items.length === 0) return;
+    pushOrganizeUndo();
     onSetOrganizeItems((prev) => [...prev, ...items]);
   };
 
   const handleUpdateOrganizeItem = (id: string, patch: Partial<OrganizeNoteItem>) => {
+    pushOrganizeUndo();
     onSetOrganizeItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
   };
 
   const handleDeleteOrganizeItem = (id: string) => {
+    pushOrganizeUndo();
     onSetOrganizeItems((prev) => prev.filter((item) => item.id !== id));
   };
 
@@ -203,10 +261,11 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     targetPhase: DayPhaseKey,
     targetItemId?: string | null
   ) => {
+    if (targetItemId === draggedId) return;
+    pushOrganizeUndo();
     onSetOrganizeItems((prev) => {
       const dragged = prev.find((i) => i.id === draggedId);
       if (!dragged) return prev;
-      if (targetItemId === draggedId) return prev;
 
       const nowIso = new Date().toISOString();
       const withoutDragged = prev.filter((i) => i.id !== draggedId);
@@ -239,6 +298,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
 
   const handleMergeOrganizeItems = (sourceId: string, targetId: string) => {
     if (!sourceId || !targetId || sourceId === targetId) return;
+    pushOrganizeUndo();
     const nowIso = new Date().toISOString();
     onSetOrganizeItems((prev) => {
       const source = prev.find((i) => i.id === sourceId);
@@ -295,6 +355,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
   };
 
   const handleMoveOrganizeStep = (id: string, delta: -1 | 1) => {
+    pushOrganizeUndo();
     onSetOrganizeItems((prev) => {
       const target = prev.find((i) => i.id === id);
       if (!target) return prev;
@@ -326,6 +387,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     phase: DayPhaseKey,
     removeFromTodo: boolean
   ) => {
+    pushOrganizeUndo();
     const newOrgId = crypto.randomUUID();
     const nowIso = new Date().toISOString();
     onSetOrganizeItems((prev) => {
@@ -352,6 +414,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     });
 
     if (removeFromTodo) {
+      pushTodoUndo();
       onSetTodoItems((prev) => prev.filter((t) => t.id !== todo.id));
     }
 
@@ -359,6 +422,43 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
       `${removeFromTodo ? 'Spostata' : 'Aggiunta'} in Organizza (${formatItalianDateShort(
         date
       )} · ${DAY_PHASE_MAP[phase].title})`
+    );
+  };
+
+  const handleDuplicateToOrganize = (
+    sourceNote: DuplicateSourcePayload,
+    date: string,
+    phase: DayPhaseKey
+  ) => {
+    pushOrganizeUndo();
+    const nowIso = new Date().toISOString();
+    onSetOrganizeItems((prev) => {
+      const existing = prev.filter((i) => i.date === date && i.phase === phase);
+      const maxOrder =
+        existing.length > 0 ? Math.max(...existing.map((i) => i.order)) + 1 : 0;
+      const duplicateItem: OrganizeNoteItem = {
+        id: crypto.randomUUID(),
+        date,
+        phase,
+        text: sourceNote.text,
+        emoji: resolveCatEmoticonId(
+          sourceNote.emoji,
+          sourceNote.text,
+          sourceNote.blockHint
+        ),
+        color: 'none',
+        done: sourceNote.done,
+        order: maxOrder,
+        source: sourceNote.source,
+        ...(sourceNote.reminderDate ? { reminderDate: sourceNote.reminderDate } : {}),
+        ...(sourceNote.reminderTime ? { reminderTime: sourceNote.reminderTime } : {}),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      return [...prev, duplicateItem];
+    });
+    onNotify(
+      `Nota duplicata in ${formatItalianDateShort(date)} · ${DAY_PHASE_MAP[phase].title}`
     );
   };
 
@@ -394,6 +494,8 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
         <DaFareSubsection
           todoItems={todoItems}
           sectionLayout={todoLayout}
+          canUndo={todoUndoStack.length > 0}
+          onUndo={handleUndoTodo}
           onChangeLayout={onChangeLayout}
           onResetLayout={onResetLayout}
           onAddTodo={handleAddTodo}
@@ -404,6 +506,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           onMergeTodos={handleMergeTodos}
           onMoveTodoStep={handleMoveTodoStep}
           onSendTodoToOrganize={handleSendTodoToOrganize}
+          onDuplicateTodoToOrganize={handleDuplicateToOrganize}
           onNotify={onNotify}
         />
       ) : (
@@ -413,6 +516,8 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           todoItems={todoItems}
           organizeItems={organizeItems}
           sectionLayout={organizeLayout}
+          canUndo={organizeUndoStack.length > 0}
+          onUndo={handleUndoOrganize}
           onChangeLayout={onChangeLayout}
           onResetLayout={onResetLayout}
           onAddOrganizeItem={handleAddOrganizeItem}
@@ -423,10 +528,12 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           onMergeOrganizeItems={handleMergeOrganizeItems}
           onMoveOrganizeStep={handleMoveOrganizeStep}
           onPickTodoForOrganize={handleSendTodoToOrganize}
+          onDuplicateOrganizeItem={handleDuplicateToOrganize}
           onNotify={onNotify}
         />
       )}
     </div>
   );
 };
+
 

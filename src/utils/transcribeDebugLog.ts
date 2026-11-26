@@ -666,6 +666,28 @@ export async function fetchTranscribeWithDebug<T extends Record<string, unknown>
         body: bodyString,
       });
     } catch (networkErr) {
+      const errName = (networkErr as { name?: string })?.name || 'Error';
+      if (errName !== 'AbortError' && !params.signal?.aborted && attempt < 1) {
+        updateLiveApiStatus({
+          phase: 'retrying',
+          attempt: attempt + 2,
+          elapsedMs: Date.now() - t0,
+          lastError: 'Connessione interrotta, nuovo tentativo...',
+        });
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(() => {
+            params.signal?.removeEventListener('abort', onAbort);
+            resolve();
+          }, 1200);
+          const onAbort = () => {
+            window.clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+          };
+          params.signal?.addEventListener('abort', onAbort, { once: true });
+        });
+        continue;
+      }
+
       const micPermissionAfter = await probeMicPermissionState();
       const sessionAfter = probeClientSessionSnapshot();
       const errMsg = networkErr instanceof Error ? networkErr.message : String(networkErr);
@@ -679,7 +701,7 @@ export async function fetchTranscribeWithDebug<T extends Record<string, unknown>
           endpoint: params.endpoint,
           caller: params.caller,
           elapsedMs,
-          errorName: (networkErr as { name?: string })?.name || 'Error',
+          errorName: errName,
           errorMessage: errMsg,
           micPermissionBefore,
           micPermissionAfter,
@@ -776,6 +798,33 @@ export async function fetchTranscribeWithDebug<T extends Record<string, unknown>
     }
   }
 
+  if (response.status === 413) {
+    const tooLargeMsg =
+      'Audio troppo pesante per l’invio diretto al server. Prova un file/registrazione leggermente più breve.';
+    const errEntry = logTranscribeEvent(
+      traceId,
+      'send_error',
+      { endpoint: params.endpoint, status: 413, bodyBytes: bodyString.length },
+      'error',
+      413
+    );
+    sendDiagnosticLogToServer(errEntry);
+    updateLiveApiStatus({
+      phase: 'error',
+      elapsedMs,
+      lastHttpStatus: 413,
+      serverSessionSeen: proxyHeaders.xServerSessionSeen,
+      lastError: tooLargeMsg,
+    });
+    return {
+      ok: false,
+      status: 413,
+      traceId,
+      isNotFound: false,
+      data: { ...(parsedData || {}), error: tooLargeMsg } as T & { error?: string },
+    };
+  }
+
   const trimmedRaw = rawText.trim();
   const serverJsonErr = typeof parsedData?.error === 'string' ? parsedData.error : '';
   const serverWarmupActive = isServerStartingHtml(trimmedRaw);
@@ -867,10 +916,12 @@ export async function fetchTranscribeWithDebug<T extends Record<string, unknown>
       : cookieLost
         ? 'cookie/sessione persi durante invio'
         : proxyHeaders.xServerSessionSeen
-          ? `server ha visto: ${proxyHeaders.xServerSessionSeen}`
-          : sessionAfter.hasDocumentCookie
-            ? 'cookie browser presenti, proxy/edge ha risposto prima del server'
-            : 'nessun cookie browser presente (sessione proxy assente o scaduta)';
+          ? `server attivo (${proxyHeaders.xServerSessionSeen})`
+          : proxyHeaders.xVercelError || proxyHeaders.xVercelId
+            ? `edge deploy ${proxyHeaders.xVercelError || '404'}`
+            : sessionAfter.hasDocumentCookie
+              ? 'cookie browser presenti, proxy ha risposto prima del server'
+              : 'endpoint non raggiunto sul server host';
     const micDiagnosis = micLost
       ? 'autorizzazione microfono persa'
       : `microfono=${micPermissionAfter}`;

@@ -5,25 +5,44 @@ export type CatEmoticonId =
   | 'cat_fuel'
   | 'cat_barber'
   | 'cat_car'
+  | 'cat_train'
+  | 'cat_plane'
   | 'cat_shower'
   | 'cat_clean'
+  | 'cat_laundry'
+  | 'cat_trash'
   | 'cat_home'
+  | 'cat_repair'
+  | 'cat_garden'
+  | 'cat_package'
   | 'cat_bills'
+  | 'cat_bank'
   | 'cat_pet'
   | 'cat_health'
+  | 'cat_pharmacy'
+  | 'cat_dentist'
   | 'cat_shop'
   | 'cat_food'
+  | 'cat_pizza'
   | 'cat_coffee'
+  | 'cat_drink'
   | 'cat_call'
+  | 'cat_email'
   | 'cat_work'
+  | 'cat_computer'
   | 'cat_book'
   | 'cat_sport'
+  | 'cat_bike'
   | 'cat_music'
   | 'cat_movie'
   | 'cat_game'
+  | 'cat_camera'
   | 'cat_gift'
+  | 'cat_clothes'
   | 'cat_sun'
+  | 'cat_mountain'
   | 'cat_baby'
+  | 'cat_keys'
   | 'cat_idea'
   | 'cat_fire'
   | 'cat_sleep'
@@ -44,7 +63,7 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     id: 'cat_note',
     label: 'Appunto',
     accentColor: '#C4B5FD',
-    keywords: /\b(appunt|nota|ricord|scriver|elenco|lista)\b/i,
+    keywords: /\b(appunt|nota|ricord|scriver|elenco|lista|memo)\b/i,
   },
   {
     id: 'cat_fuel',
@@ -58,140 +77,266 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Barbiere / Capelli',
     accentColor: '#F472B6',
     keywords:
-      /\b(barber\w*|barbier\w*|parrucchier\w*|tagli\w*(\s+capelli|\s+barba)?|capell\w*|barba|piega|tint\w*|rasatur\w*|shatush|balayage|acconciatur\w*)\b/i,
+      /\b(barber\w*|barbier\w*|parrucchier\w*|tagli\w*(\s+capelli|\s+barba)?|capell\w*|barba|piega|tint\w*|rasatur\w*|shatush|balayage|acconciatur\w*|forbic\w*)\b/i,
   },
   {
     id: 'cat_car',
-    label: 'Auto & Viaggi',
+    label: 'Auto & Meccanico',
     accentColor: '#60A5FA',
     keywords:
-      /\b(auto|macchin\w*|meccanic\w*|gommist\w*|tagliand\w*|gomme|revisione|lavaggio\s+auto|autolavagg\w*|parchegg\w*|treno|aereo|volo|bigliett\w*|assicuraz\w*|bollo\s+auto|viagg\w*|partir\w*|autostrad\w*)\b/i,
+      /\b(auto|macchin\w*|meccanic\w*|gommist\w*|tagliand\w*|gomme|revisione|lavaggio\s+auto|autolavagg\w*|parchegg\w*|assicuraz\w*|bollo\s+auto|autostrad\w*|guidar\w*)\b/i,
+  },
+  {
+    id: 'cat_train',
+    label: 'Treno & Metro',
+    accentColor: '#38BDF8',
+    keywords:
+      /\b(treno|treni|stazion\w*|metro|metropolitan\w*|bus|autobus|tram|pullman|frecciarossa|italo|pendolar\w*)\b/i,
+  },
+  {
+    id: 'cat_plane',
+    label: 'Volo & Viaggi',
+    accentColor: '#0EA5E9',
+    keywords:
+      /\b(aere\w*|volo|voli|aeroport\w*|imbarc\w*|valigi\w*|viagg\w*|passaport\w*|check-?in|hotel|b&b|partir\w*|bigliett\w*)\b/i,
   },
   {
     id: 'cat_shower',
     label: 'Doccia & Cura',
     accentColor: '#38BDF8',
     keywords:
-      /\b(docci\w*|bagno|shampoo|balsamo|skincare|lavars\w*|lavar\w*\s+(i\s+denti|la\s+faccia|le\s+mani)|crema|denti|spazzolin\w*|viso|maschera\s+viso|depilaz\w*|unghie|estetist\w*)\b/i,
+      /\b(docci\w*|bagno|shampoo|balsamo|skincare|lavars\w*|lavar\w*\s+(la\s+faccia|le\s+mani)|crema|sapone|viso|maschera\s+viso|depilaz\w*|unghie|estetist\w*|barba\s+doccia)\b/i,
   },
   {
     id: 'cat_clean',
-    label: 'Pulizie & Bucato',
+    label: 'Pulizie & Casa',
     accentColor: '#2DD4BF',
     keywords:
-      /\b(pulir\w*|puliz\w*|lavatr\w*|bucat\w*|panni|stender\w*|stirar\w*|riordin\w*|spazzar\w*|scopa|aspirapolver\w*|piatt\w*|lavastovigli\w*|polvere|spazzatur\w*|differenziat\w*|immondiz\w*|sistemar\w*|mocio|igienizz\w*)\b/i,
+      /\b(pulir\w*|puliz\w*|riordin\w*|spazzar\w*|scopa|aspirapolver\w*|piatt\w*|lavastovigli\w*|polvere|sistemar\w*|mocio|igienizz\w*|vetri|paviment\w*)\b/i,
+  },
+  {
+    id: 'cat_laundry',
+    label: 'Bucato & Lavatrice',
+    accentColor: '#22D3EE',
+    keywords:
+      /\b(lavatr\w*|bucat\w*|panni|stender\w*|stirar\w*|asciugatric\w*|detersiv\w*|ammorbident\w*|ferro\s+da\s+stiro)\b/i,
+  },
+  {
+    id: 'cat_trash',
+    label: 'Spazzatura & Riciclo',
+    accentColor: '#4ADE80',
+    keywords:
+      /\b(spazzatur\w*|differenziat\w*|immondiz\w*|rifiut\w*|organico|umido|plastica|carta\s+vetro|bidon\w*|buttar\w*\s+(la\s+)?spazzatura|sacchett\w*)\b/i,
   },
   {
     id: 'cat_home',
-    label: 'Casa & Pacchi',
+    label: 'Casa',
     accentColor: '#14B8A6',
     keywords:
-      /\b(casa|giardin\w*|piant\w*|innaffiar\w*|chiav\w*|riparaz\w*|idraulic\w*|elettricist\w*|caldaia|condomini\w*|pacco|pacchi|corriere|posta|poste|ufficio\s+postale|mobil\w*|ikea|ferrament\w*)\b/i,
+      /\b(casa|condomini\w*|mobil\w*|ikea|camera|salotto|cucina\s+mobili|trasloc\w*|stanz\w*|affittare)\b/i,
+  },
+  {
+    id: 'cat_repair',
+    label: 'Attrezzi & Riparazioni',
+    accentColor: '#F59E0B',
+    keywords:
+      /\b(riparaz\w*|aggiustar\w*|idraulic\w*|elettricist\w*|caldaia|ferrament\w*|trapan\w*|martell\w*|cacciavit\w*|bricolage|montar\w*|lavori\s+casa|tecnico)\b/i,
+  },
+  {
+    id: 'cat_garden',
+    label: 'Piante & Giardino',
+    accentColor: '#22C55E',
+    keywords:
+      /\b(giardin\w*|piant\w*|innaffiar\w*|fior\w*|prato|tagliare\s+erba|orto|potar\w*|balcone\s+piante|terriccio|vaso)\b/i,
+  },
+  {
+    id: 'cat_package',
+    label: 'Pacchi & Posta',
+    accentColor: '#D97706',
+    keywords:
+      /\b(pacco|pacchi|corriere|posta|poste|ufficio\s+postale|spedizion\w*|consegn\w*|ritirar\w*\s+(il\s+)?pacco|amazon|vinted|reso|raccomandat\w*)\b/i,
   },
   {
     id: 'cat_bills',
-    label: 'Bollette & Soldi',
+    label: 'Bollette & Scadenze',
     accentColor: '#FBBF24',
     keywords:
-      /\b(bollett\w*|luce|enel|acqua|affitt\w*|mutuo|pagar\w*|pagament\w*|bonific\w*|fattur\w*|banc\w*|bancomat|carta(\s+di\s+credito)?|tass\w*|f24|multa|abbonament\w*|ricaric\w*|sold\w*|euro|stipend\w*|commercialist\w*|spese\s+condominiali|pos|preliev\w*)\b/i,
+      /\b(bollett\w*|luce|enel|acqua|gas\s+casa|affitt\w*|mutuo|fattur\w*|tass\w*|f24|multa|abbonament\w*|spese\s+condominiali|commercialist\w*)\b/i,
+  },
+  {
+    id: 'cat_bank',
+    label: 'Banca & Soldi',
+    accentColor: '#10B981',
+    keywords:
+      /\b(banc\w*|bancomat|carta(\s+di\s+credito)?|pagar\w*|pagament\w*|bonific\w*|ricaric\w*|sold\w*|euro|stipend\w*|pos|preliev\w*|portafogli|conto|paypal|satispay)\b/i,
   },
   {
     id: 'cat_pet',
     label: 'Animali & Pet',
     accentColor: '#F472B6',
     keywords:
-      /\b(gatt\w*|mici\w*|can[ei]|veterinari\w*|croccantin\w*|lettiere?|toelett\w*|guinzagli\w*|antiparassitari\w*|cibo\s+(gatto|cane))\b/i,
+      /\b(gatt\w*|mici\w*|can[ei]|veterinari\w*|croccantin\w*|lettiere?|toelett\w*|guinzagli\w*|antiparassitari\w*|cibo\s+(gatto|cane)|zamp\w*|passeggiata\s+cane)\b/i,
   },
   {
     id: 'cat_health',
-    label: 'Salute & Medico',
+    label: 'Medico & Salute',
     accentColor: '#4ADE80',
     keywords:
-      /\b(medic\w*|dottor\w*|visit\w*(\s+medica|\s+specialistica)?|dentist\w*|farmac\w*|medicin\w*|analis\w*|esami\s+(del\s+sangue|clinici)|ricett\w*|salut\w*|pillol\w*|ospedal\w*|oculist\w*|terapi\w*|fisioterapi\w*|osteopat\w*|psicolog\w*|vaccin\w*|febbr\w*|raffredd\w*|tachipirin\w*)\b/i,
+      /\b(medic\w*|dottor\w*|visit\w*(\s+medica|\s+specialistica)?|analis\w*|esami\s+(del\s+sangue|clinici)|salut\w*|ospedal\w*|oculist\w*|terapi\w*|fisioterapi\w*|osteopat\w*|psicolog\w*|vaccin\w*|pressione)\b/i,
+  },
+  {
+    id: 'cat_pharmacy',
+    label: 'Farmacia & Medicine',
+    accentColor: '#EF4444',
+    keywords:
+      /\b(farmac\w*|medicin\w*|pillol\w*|ricett\w*(\s+medica)?|tachipirin\w*|ibuprofen\w*|sciropp\w*|cerott\w*|antibiotic\w*|integrator\w*|vitamine)\b/i,
+  },
+  {
+    id: 'cat_dentist',
+    label: 'Dentista & Denti',
+    accentColor: '#67E8F9',
+    keywords:
+      /\b(dentist\w*|denti|spazzolin\w*|igiene\s+dentale|carie|apparecchio\s+denti|pulizia\s+denti|ortodonz\w*|filo\s+interdentale)\b/i,
   },
   {
     id: 'cat_shop',
-    label: 'Spesa & Acquisti',
+    label: 'Spesa & Carrello',
     accentColor: '#60A5FA',
     keywords:
-      /\b(spes\w*|supermercat\w*|esselunga|conad|coop|lidl|eurospin|carrefour|comprar\w*|acquist\w*|latte|pane|frutta|verdur\w*|negoz\w*|amazon|ordinar\w*|scarp\w*|vestit\w*|magli\w*|pantalon\w*|carrell\w*)\b/i,
+      /\b(spes\w*|supermercat\w*|esselunga|conad|coop|lidl|eurospin|carrefour|comprar\w*|acquist\w*|latte|pane|frutta|verdur\w*|negoz\w*|ordinar\w*|carrell\w*|alimentari)\b/i,
   },
   {
     id: 'cat_food',
     label: 'Cucina & Pasti',
     accentColor: '#FB923C',
     keywords:
-      /\b(cibo|cena\w*|pranz\w*|cucin\w*|ricett\w*|past\w*|pizz\w*|ristorant\w*|mangiar\w*|forn\w*|sushi|panin\w*|spesa\s+cena|apparecchi\w*|dolce|torta|gelat\w*)\b/i,
+      /\b(cibo|cena\w*|pranz\w*|cucin\w*|ricett\w*|past\w*|ristorant\w*|mangiar\w*|forn\w*|sushi|apparecchi\w*|dolce|torta|gelat\w*|preparar\w*\s+da\s+mangiare)\b/i,
+  },
+  {
+    id: 'cat_pizza',
+    label: 'Pizza & Takeaway',
+    accentColor: '#F97316',
+    keywords:
+      /\b(pizz\w*|pizzeri\w*|hamburger|burger|kebab|panin\w*|patatine|glovo|deliveroo|just\s*eat|take\s*away|asporto)\b/i,
   },
   {
     id: 'cat_coffee',
-    label: 'Caffè & Pausa',
+    label: 'Caffè & Colazione',
     accentColor: '#F59E0B',
     keywords:
-      /\b(caff[eè]\w*|tazz\w*|colazion\w*|merend\w*|paus\w*|th[eè]|t[eè]|tisan\w*|bar|cappuccin\w*|cornett\w*|aperitiv\w*|spritz|brioche)\b/i,
+      /\b(caff[eè]\w*|tazz\w*|colazion\w*|merend\w*|paus\w*|th[eè]|t[eè]|tisan\w*|cappuccin\w*|cornett\w*|brioche|moka)\b/i,
+  },
+  {
+    id: 'cat_drink',
+    label: 'Aperitivo & Drink',
+    accentColor: '#EC4899',
+    keywords:
+      /\b(aperitiv\w*|spritz|birr\w*|vino|cocktail|bere|drink|brindis\w*|pub|enotec\w*|locale)\b/i,
   },
   {
     id: 'cat_call',
-    label: 'Chiamate & Chat',
+    label: 'Chiamate & Telefono',
     accentColor: '#38BDF8',
     keywords:
-      /\b(chiamar\w*|telefon\w*|messagg\w*|whatsapp|sms|email|e-mail|mail|risponder\w*|contatt\w*|videochiamat\w*|zoom|call|sentir\w*|scriver\w*\s+a)\b/i,
+      /\b(chiamar\w*|telefon\w*|whatsapp|sms|risponder\w*|contatt\w*|videochiamat\w*|zoom|call|sentir\w*|messagg\w*)\b/i,
+  },
+  {
+    id: 'cat_email',
+    label: 'Email & Scrivere',
+    accentColor: '#6366F1',
+    keywords:
+      /\b(email|e-mail|mail|pec|inviar\w*(\s+la)?\s+mail|letter\w*|newsletter|posta\s+elettronica|scriver\w*\s+a)\b/i,
   },
   {
     id: 'cat_work',
     label: 'Lavoro & Ufficio',
     accentColor: '#818CF8',
     keywords:
-      /\b(lavor\w*|riunion\w*|ufficio|client\w*|document\w*|cv|curriculum|pc|computer|scrivani\w*|turno|contratt\w*|progett\w*|presentazion\w*|stamp\w*|colloqu\w*|smart\s*working)\b/i,
+      /\b(lavor\w*|riunion\w*|ufficio|client\w*|document\w*|cv|curriculum|scrivani\w*|turno|contratt\w*|progett\w*|presentazion\w*|colloqu\w*|smart\s*working|busta\s+paga)\b/i,
+  },
+  {
+    id: 'cat_computer',
+    label: 'PC & Tech',
+    accentColor: '#3B82F6',
+    keywords:
+      /\b(pc|computer|portatil\w*|laptop|stamp\w*|backup|aggiornar\w*|app|software|sito|codice|password|wifi|stampant\w*|caricator\w*|tablet|iphone|smartphone)\b/i,
   },
   {
     id: 'cat_book',
-    label: 'Studio & Lettura',
+    label: 'Studio & Libri',
     accentColor: '#A78BFA',
     keywords:
       /\b(libr\w*|legger\w*|lettur\w*|stud\w*|esam\w*|cors\w*|ripas\w*|bibliotec\w*|scuol\w*|compit\w*|lezion\w*|tesi|universit\w*|diario)\b/i,
   },
   {
     id: 'cat_sport',
-    label: 'Sport & Movimento',
+    label: 'Palestra & Fitness',
     accentColor: '#34D399',
     keywords:
-      /\b(palestr\w*|cors[ae]|correr\w*|allen\w*|sport\w*|cammin\w*|bici\w*|biciclett\w*|nuot\w*|piscin\w*|yoga|pilates|calcio|padel|tennis|stretching|pesi|workout)\b/i,
+      /\b(palestr\w*|cors[ae]|correr\w*|allen\w*|sport\w*|cammin\w*|nuot\w*|piscin\w*|yoga|pilates|calcio|padel|tennis|stretching|pesi|workout|crossfit)\b/i,
+  },
+  {
+    id: 'cat_bike',
+    label: 'Bici & Mobilità',
+    accentColor: '#10B981',
+    keywords:
+      /\b(bici|biciclett\w*|ciclism\w*|monopattin\w*|scooter|moto|casco|pedal\w*)\b/i,
   },
   {
     id: 'cat_music',
-    label: 'Musica & Audio',
+    label: 'Musica & Cuffie',
     accentColor: '#C084FC',
     keywords:
-      /\b(music\w*|concert\w*|canzon\w*|suonar\w*|chitarr\w*|pianofort\w*|playlist|cuffi\w*|spotify|podcast|audio\s*libro)\b/i,
+      /\b(music\w*|concert\w*|canzon\w*|suonar\w*|chitarr\w*|pianofort\w*|playlist|cuffi\w*|spotify|podcast|audio\s*libro|cassa\s+audio)\b/i,
   },
   {
     id: 'cat_movie',
-    label: 'Film & Serie',
+    label: 'Film & Cinema',
     accentColor: '#F472B6',
     keywords:
       /\b(film|serie\s*tv|netflix|prime\s*video|disney|cinema|teatr\w*|spettacol\w*|tv|episod\w*|documentari\w*|guardare\s+un)\b/i,
   },
   {
     id: 'cat_game',
-    label: 'Giochi & Svago',
+    label: 'Gaming & Svago',
     accentColor: '#6366F1',
     keywords:
       /\b(gioc\w*|videogio\w*|playstation|ps5|switch|nintendo|xbox|partit\w*|consol\w*|svag\w*|carte|giochi\s+da\s+tavolo|uscit\w*)\b/i,
+  },
+  {
+    id: 'cat_camera',
+    label: 'Foto & Video',
+    accentColor: '#8B5CF6',
+    keywords:
+      /\b(foto\w*|fotocamer\w*|video|filmar\w*|selfie|album\s+foto|scatt\w*|reel|instagram)\b/i,
   },
   {
     id: 'cat_gift',
     label: 'Regali & Feste',
     accentColor: '#FB7185',
     keywords:
-      /\b(compleann\w*|regal\w*|anniversar\w*|fior\w*|sorpres\w*|fest[ae]\w*|matrimon\w*|invit\w*|brindis\w*|party|biglietto\s+auguri)\b/i,
+      /\b(compleann\w*|regal\w*|anniversar\w*|sorpres\w*|fest[ae]\w*|matrimon\w*|invit\w*|party|biglietto\s+auguri|natale)\b/i,
+  },
+  {
+    id: 'cat_clothes',
+    label: 'Vestiti & Cambio',
+    accentColor: '#E879F9',
+    keywords:
+      /\b(vestit\w*|scarp\w*|magli\w*|pantalon\w*|giacc\w*|cappott\w*|camici\w*|armadio|guardarob\w*|zain\w*|borsa|sart\w*|cintur\w*)\b/i,
   },
   {
     id: 'cat_sun',
-    label: 'Mare & Natura',
+    label: 'Mare & Sole',
     accentColor: '#FBBF24',
     keywords:
-      /\b(sole|mare|spiaggi\w*|parco|montagn\w*|picnic|natura|vacanz\w*|gita|terrazz\w*|passeggi\w*|aperto)\b/i,
+      /\b(sole|mare|spiaggi\w*|parco|picnic|vacanz\w*|terrazz\w*|passeggi\w*|aperto|costume|ombrellon\w*)\b/i,
+  },
+  {
+    id: 'cat_mountain',
+    label: 'Montagna & Natura',
+    accentColor: '#16A34A',
+    keywords:
+      /\b(montagn\w*|trekking|escursion\w*|sentier\w*|campegg\w*|tend\w*|bosco|natura|camminata\s+montagna|sci|rifugi\w*)\b/i,
   },
   {
     id: 'cat_baby',
@@ -201,8 +346,15 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
       /\b(figli\w*|bimb\w*|bambin\w*|asilo|mamma|papà|papa|genitor\w*|nonn\w*|famigl\w*|nipot\w*|fratell\w*|sorell\w*)\b/i,
   },
   {
+    id: 'cat_keys',
+    label: 'Chiavi & Sicurezza',
+    accentColor: '#EAB308',
+    keywords:
+      /\b(chiav\w*|serratur\w*|lucchett\w*|duplicat\w*\s+chiav|cancello|telecomando|porta|chiuder\w*)\b/i,
+  },
+  {
     id: 'cat_idea',
-    label: 'Idee & Progetti',
+    label: 'Idee & Lampadina',
     accentColor: '#FDE047',
     keywords:
       /\b(ide[ae]|pensar\w*|invent\w*|creativ\w*|ispiraz\w*|capir\w*|soluzion\w*|bozz\w*)\b/i,
@@ -223,7 +375,7 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
   },
   {
     id: 'cat_think',
-    label: 'Controllo & Dubbi',
+    label: 'Controllo & Ricerca',
     accentColor: '#818CF8',
     keywords:
       /\b(dubbi\w*|forse|valut\w*|sceglier\w*|domand\w*|chiss\w*|controll\w*|verific\w*|decider\w*|cercar\w*)\b/i,
@@ -240,7 +392,7 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Affetto & Cuore',
     accentColor: '#F472B6',
     keywords:
-      /\b(amor\w*|cuor\w*|baci\w*|abbracc\w*|tesor\w*|dolc\w*|coccol\w*|affett\w*|grazie)\b/i,
+      /\b(amor\w*|cuor\w*|baci\w*|abbracc\w*|tesor\w*|dolc\w*|coccol\w*|grazie)\b/i,
   },
   {
     id: 'cat_happy',
@@ -261,7 +413,6 @@ export const CAT_EMOTICON_MAP: Record<CatEmoticonId, CatEmoticonDef> =
   );
 
 const LEGACY_EMOJI_TO_CAT: Record<string, CatEmoticonId> = {
-  // Previous cat_ IDs that were merged or renamed
   cat_lol: 'cat_happy',
   cat_kiss: 'cat_love',
   cat_wink: 'cat_happy',
@@ -273,7 +424,6 @@ const LEGACY_EMOJI_TO_CAT: Record<string, CatEmoticonId> = {
   cat_sick: 'cat_health',
   cat_hug: 'cat_love',
   cat_fun: 'cat_music',
-  // Legacy Unicode emoji values
   '📝': 'cat_note',
   '🐱': 'cat_note',
   '😸': 'cat_happy',
@@ -302,7 +452,7 @@ const LEGACY_EMOJI_TO_CAT: Record<string, CatEmoticonId> = {
   '🐾': 'cat_pet',
   '💡': 'cat_idea',
   '🔥': 'cat_fire',
-  '💳': 'cat_bills',
+  '💳': 'cat_bank',
   '🛒': 'cat_shop',
   '🍽️': 'cat_food',
   '☕': 'cat_coffee',
@@ -328,26 +478,45 @@ const LEGACY_EMOJI_TO_CAT: Record<string, CatEmoticonId> = {
 const INFERENCE_PRIORITY_ORDER: CatEmoticonId[] = [
   'cat_fuel',
   'cat_barber',
+  'cat_package',
+  'cat_laundry',
+  'cat_trash',
+  'cat_pharmacy',
+  'cat_dentist',
+  'cat_repair',
+  'cat_garden',
+  'cat_train',
+  'cat_plane',
+  'cat_keys',
+  'cat_clothes',
+  'cat_bank',
+  'cat_bills',
+  'cat_pizza',
+  'cat_drink',
+  'cat_coffee',
+  'cat_food',
   'cat_shower',
   'cat_health',
-  'cat_bills',
   'cat_pet',
   'cat_car',
   'cat_clean',
-  'cat_food',
-  'cat_coffee',
   'cat_shop',
+  'cat_email',
   'cat_call',
+  'cat_computer',
   'cat_work',
   'cat_book',
+  'cat_bike',
   'cat_sport',
+  'cat_camera',
   'cat_music',
   'cat_movie',
   'cat_game',
   'cat_gift',
-  'cat_home',
+  'cat_mountain',
   'cat_sun',
   'cat_baby',
+  'cat_home',
   'cat_fire',
   'cat_sleep',
   'cat_idea',

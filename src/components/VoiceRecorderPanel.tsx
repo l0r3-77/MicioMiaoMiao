@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { blobToBase64, useVoiceRecorder, type RecordedAudioResult } from '../hooks/useVoiceRecorder';
+import { compactAudioBlob } from '../utils/audioCompact';
 import type { NoteColor, NoteEntry } from '../types/note';
 import { fetchApiJsonWithRetry } from '../utils/apiError';
 import { deleteAudioClip, getAudioClip, saveAudioClip } from '../utils/audioStorage';
@@ -324,21 +325,6 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
 
     setApiError(null);
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const res = reader.result;
-          if (typeof res !== 'string') {
-            reject(new Error('Impossibile leggere il file audio.'));
-            return;
-          }
-          const idx = res.indexOf(',');
-          resolve(idx >= 0 ? res.slice(idx + 1) : res);
-        };
-        reader.onerror = () => reject(new Error('Errore durante la lettura del file audio.'));
-        reader.readAsDataURL(file);
-      });
-
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
       const inferredFromExt =
         ext === 'mp3'
@@ -353,12 +339,20 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
                   ? 'audio/aac'
                   : 'audio/mp4';
 
+      const compacted = await compactAudioBlob(file);
+      const finalBlob = compacted.blob;
+      const finalMime = compacted.wasCompacted
+        ? compacted.mimeType
+        : file.type || inferredFromExt;
+
+      const base64 = await blobToBase64(finalBlob);
+
       await processAudioPayload({
-        blob: file,
+        blob: finalBlob,
         base64,
-        mimeType: file.type || inferredFromExt,
-        durationSeconds: 1,
-        sizeBytes: file.size,
+        mimeType: finalMime,
+        durationSeconds: compacted.durationSeconds,
+        sizeBytes: finalBlob.size,
         recordedAt: new Date().toISOString(),
       });
     } catch (err) {

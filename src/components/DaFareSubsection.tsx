@@ -9,6 +9,7 @@ import {
   Circle,
   ClipboardPaste,
   Copy,
+  CopyPlus,
   GripVertical,
   Loader2,
   Mic,
@@ -16,6 +17,7 @@ import {
   Send,
   Square,
   Trash2,
+  Undo2,
   X,
 } from 'lucide-react';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -53,9 +55,13 @@ import {
   type CustomizableBlockItem,
 } from './CustomizableSectionStack';
 
+import type { DuplicateSourcePayload } from './DailyTodoSection';
+
 interface DaFareSubsectionProps {
   todoItems: TodoNoteItem[];
   sectionLayout: SectionLayoutState;
+  canUndo: boolean;
+  onUndo: () => void;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddTodo: (item: TodoNoteItem) => void;
@@ -75,12 +81,19 @@ interface DaFareSubsectionProps {
     phase: DayPhaseKey,
     removeFromTodo: boolean
   ) => void;
+  onDuplicateTodoToOrganize: (
+    sourceNote: DuplicateSourcePayload,
+    date: string,
+    phase: DayPhaseKey
+  ) => void;
   onNotify: (msg: string) => void;
 }
 
 export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   todoItems,
   sectionLayout,
+  canUndo,
+  onUndo,
   onChangeLayout,
   onResetLayout,
   onAddTodo,
@@ -91,6 +104,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   onMergeTodos,
   onMoveTodoStep,
   onSendTodoToOrganize,
+  onDuplicateTodoToOrganize,
   onNotify,
 }) => {
   const [composerBlock, setComposerBlock] = useState<TodoBlockKey>('poi');
@@ -115,6 +129,11 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   const [showModalCatPicker, setShowModalCatPicker] = useState(false);
   const [modalOrgDate, setModalOrgDate] = useState(() => toISODate(new Date()));
   const [modalOrgPhase, setModalOrgPhase] = useState<DayPhaseKey>('mattina');
+
+  // Duplicate Note Modal (to chosen Date & Phase)
+  const [duplicateTodo, setDuplicateTodo] = useState<TodoNoteItem | null>(null);
+  const [dupDate, setDupDate] = useState(() => toISODate(new Date()));
+  const [dupPhase, setDupPhase] = useState<DayPhaseKey>('mattina');
 
   // Drag & Drop state (Desktop HTML5 + Touch Pointer): supports Move/Reorder AND Merge
   const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null);
@@ -736,7 +755,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           text={item.text}
                           blockHint={blockKey}
                           variant="fullFace"
-                          sizeClass="h-[22px] w-[22px]"
+                          sizeClass="h-6 w-6"
                         />
                         <span
                           className={`text-xs font-medium text-[var(--todo-text)] leading-[1.25] break-words ${
@@ -766,6 +785,21 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           <span className="font-mono tabular-nums">{remShort}</span>
                         </a>
                       )}
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDuplicateTodo(item);
+                          setDupDate(item.reminderDate || toISODate(new Date()));
+                          setDupPhase('mattina');
+                        }}
+                        aria-label={`Duplica "${item.text}"`}
+                        title="Duplica in data e fase"
+                        className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)] shrink-0 transition-colors"
+                      >
+                        <CopyPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
 
                       {isMergeTarget && (
                         <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
@@ -824,27 +858,39 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
         >
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-xs sm:text-sm font-bold text-[var(--todo-text)]">Nuova nota</h3>
-            <button
-              type="button"
-              onClick={() => setShowComposerCatPicker((v) => !v)}
-              aria-expanded={showComposerCatPicker}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
-                showComposerCatPicker
-                  ? 'border-[var(--todo-accent)] bg-[var(--todo-accent-soft)] text-[var(--todo-text)]'
-                  : 'border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)]'
-              }`}
-            >
-              <CatEmoticonIcon
-                emoticonId={effectiveComposerCat}
-                variant="fullFace"
-                sizeClass="h-4.5 w-4.5"
-              />
-              <span>
-                {manualCatEmoticon
-                  ? CAT_EMOTICON_MAP[effectiveComposerCat].label
-                  : `Gattino · ${CAT_EMOTICON_MAP[effectiveComposerCat].label}`}
-              </span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={onUndo}
+                disabled={!canUndo}
+                aria-label="Annulla ultima azione"
+                title="Annulla ultima azione"
+                className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] disabled:opacity-35 disabled:pointer-events-none transition-colors"
+              >
+                <Undo2 className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowComposerCatPicker((v) => !v)}
+                aria-expanded={showComposerCatPicker}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                  showComposerCatPicker
+                    ? 'border-[var(--todo-accent)] bg-[var(--todo-accent-soft)] text-[var(--todo-text)]'
+                    : 'border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)]'
+                }`}
+              >
+                <CatEmoticonIcon
+                  emoticonId={effectiveComposerCat}
+                  variant="fullFace"
+                  sizeClass="h-5 w-5"
+                />
+                <span>
+                  {manualCatEmoticon
+                    ? CAT_EMOTICON_MAP[effectiveComposerCat].label
+                    : `Gattino · ${CAT_EMOTICON_MAP[effectiveComposerCat].label}`}
+                </span>
+              </button>
+            </div>
           </div>
 
           {showComposerCatPicker && (
@@ -1371,6 +1417,121 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 ) : (
                   <span>Aggiungi tutte le note</span>
                 )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Compact Modal: Duplicate Note into Specific Date & Phase */}
+      {duplicateTodo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="todo-duplicate-title"
+          onClick={() => setDuplicateTodo(null)}
+        >
+          <div
+            className="w-full max-w-[320px] rounded-2xl bg-[var(--todo-card)] border border-[var(--todo-card-border)] p-3.5 shadow-2xl space-y-2.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <CopyPlus className="h-4 w-4 text-[var(--todo-accent)] shrink-0" aria-hidden="true" />
+                <h3 id="todo-duplicate-title" className="text-xs font-bold text-[var(--todo-text)]">
+                  Duplica nota
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicateTodo(null)}
+                aria-label="Chiudi"
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[var(--todo-card-border)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)] shrink-0"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] p-2">
+              <CatEmoticonIcon
+                emoticonId={duplicateTodo.emoji}
+                text={duplicateTodo.text}
+                blockHint={duplicateTodo.block}
+                variant="fullFace"
+                sizeClass="h-6 w-6"
+              />
+              <span className="text-xs font-medium text-[var(--todo-text)] break-words leading-snug">
+                {duplicateTodo.text}
+              </span>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!dupDate) return;
+                onDuplicateTodoToOrganize(
+                  {
+                    text: duplicateTodo.text,
+                    emoji: duplicateTodo.emoji,
+                    done: duplicateTodo.done,
+                    source: duplicateTodo.source,
+                    reminderDate: duplicateTodo.reminderDate,
+                    reminderTime: duplicateTodo.reminderTime,
+                    blockHint: duplicateTodo.block,
+                  },
+                  dupDate,
+                  dupPhase
+                );
+                setDuplicateTodo(null);
+              }}
+              className="space-y-2"
+            >
+              <label className="block">
+                <span className="block text-[10.5px] font-semibold text-[var(--todo-text-muted)] mb-1">
+                  Data di destinazione
+                </span>
+                <input
+                  type="date"
+                  required
+                  value={dupDate}
+                  onChange={(e) => setDupDate(e.target.value)}
+                  className="block w-full max-w-full min-w-0 min-h-[34px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)]"
+                />
+              </label>
+
+              <div>
+                <span className="block text-[10.5px] font-semibold text-[var(--todo-text-muted)] mb-1">
+                  Fase del giorno
+                </span>
+                <div className="grid grid-cols-2 gap-1">
+                  {DAY_PHASES.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setDupPhase(p.key)}
+                      className={`min-h-[30px] rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors ${
+                        dupPhase === p.key
+                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
+                          : 'border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
+                      }`}
+                    >
+                      {p.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  background:
+                    'linear-gradient(to bottom, var(--todo-accent), var(--todo-accent-dark))',
+                }}
+                className="w-full min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+              >
+                <CopyPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Conferma e duplica</span>
               </button>
             </form>
           </div>

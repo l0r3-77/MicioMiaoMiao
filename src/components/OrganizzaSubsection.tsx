@@ -10,17 +10,20 @@ import {
   Circle,
   ClipboardPaste,
   Copy,
+  CopyPlus,
   GripVertical,
+  LayoutGrid,
   ListTodo,
   Loader2,
   Mic,
   Plus,
   Printer,
+  Rows3,
   Send,
   Square,
   Trash2,
+  Undo2,
   X,
-  ZoomIn,
 } from 'lucide-react';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import type {
@@ -68,12 +71,16 @@ import {
   OrganizeExportModal,
 } from './OrganizeExportBlock';
 
+import type { DuplicateSourcePayload } from './DailyTodoSection';
+
 interface OrganizzaSubsectionProps {
   dailyNotes?: DailyNote[];
   todoItems: TodoNoteItem[];
   organizeItems: OrganizeNoteItem[];
   sectionLayout: SectionLayoutState;
   focusTodaySignal?: number;
+  canUndo: boolean;
+  onUndo: () => void;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddOrganizeItem: (item: OrganizeNoteItem) => void;
@@ -94,6 +101,11 @@ interface OrganizzaSubsectionProps {
     phase: DayPhaseKey,
     removeFromTodo: boolean
   ) => void;
+  onDuplicateOrganizeItem: (
+    sourceNote: DuplicateSourcePayload,
+    date: string,
+    phase: DayPhaseKey
+  ) => void;
   onNotify: (msg: string) => void;
 }
 
@@ -103,6 +115,8 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   organizeItems,
   sectionLayout,
   focusTodaySignal = 0,
+  canUndo,
+  onUndo,
   onChangeLayout,
   onResetLayout,
   onAddOrganizeItem,
@@ -113,14 +127,20 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   onMergeOrganizeItems,
   onMoveOrganizeStep,
   onPickTodoForOrganize,
+  onDuplicateOrganizeItem,
   onNotify,
 }) => {
   const todayIso = toISODate(new Date());
   const [rangeStartIso, setRangeStartIso] = useState<string>(() => todayIso);
   const [totalDaysCount, setTotalDaysCount] = useState<number>(14);
-  // Horizontal zoom slider: 1 to 4 visible days on screen (default 4)
-  const [visibleDaysZoom, setVisibleDaysZoom] = useState<number>(4);
+  // Dual view switcher: 'daily' (Giornaliera) or 'weekly' (Settimanale 2x3 compact grid)
+  const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
   const [copiedDayIso, setCopiedDayIso] = useState<string | null>(null);
+
+  // Duplicate Note Modal (choose target date & phase)
+  const [duplicateOrgItem, setDuplicateOrgItem] = useState<OrganizeNoteItem | null>(null);
+  const [dupDate, setDupDate] = useState<string>(() => todayIso);
+  const [dupPhase, setDupPhase] = useState<DayPhaseKey>('mattina');
 
   // Compact New Note Modal (triggered by tapping a day phase or "+ Nuova nota")
   const [newModalOpen, setNewModalOpen] = useState(false);
@@ -718,6 +738,17 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
+                onClick={onUndo}
+                disabled={!canUndo}
+                aria-label="Annulla ultima azione"
+                title="Annulla ultima azione"
+                className="min-h-[34px] w-[34px] inline-flex items-center justify-center rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-text)] hover:opacity-85 disabled:opacity-35 disabled:pointer-events-none transition-opacity"
+              >
+                <Undo2 className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   setExportModalDate(rangeStartIso);
                   setExportModalScope('week');
@@ -750,7 +781,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         <section className="rounded-2xl border border-[var(--todo-card-border)] bg-[var(--todo-card)] p-2 sm:p-3 shadow-xs space-y-2">
           <div className="flex items-center justify-between px-1">
             <span className="text-[11px] font-semibold text-[var(--todo-text-muted)]">
-              Calendario verticale
+              {viewMode === 'daily' ? 'Calendario verticale' : 'Vista settimanale compatta'}
             </span>
             <button
               type="button"
@@ -761,55 +792,65 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             </button>
           </div>
 
-          {/* Horizontal Zoom Bar INSIDE the calendar block: 1 to 4 */}
-          <div className="rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] px-2.5 py-1.5 space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-[var(--todo-text)]">
-                <ZoomIn className="h-3 w-3 text-[var(--todo-accent)]" aria-hidden="true" />
-                Zoom giorni
-              </span>
-              <span className="font-mono text-[11px] font-bold text-[var(--todo-text)] tabular-nums">
-                {visibleDaysZoom} {visibleDaysZoom === 1 ? 'giorno' : 'giorni'}
-              </span>
-            </div>
+          {/* Dual View Toggle: Giornaliera | Settimanale */}
+          <div
+            role="group"
+            aria-label="Modalità visualizzazione calendario"
+            className="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] p-1"
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode('daily')}
+              aria-pressed={viewMode === 'daily'}
+              style={
+                viewMode === 'daily'
+                  ? {
+                      background:
+                        'linear-gradient(to bottom, var(--todo-accent), var(--todo-accent-dark))',
+                    }
+                  : undefined
+              }
+              className={`min-h-[32px] inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                viewMode === 'daily'
+                  ? 'text-white shadow-xs'
+                  : 'text-[var(--todo-text-muted)] hover:text-[var(--todo-text)]'
+              }`}
+            >
+              <Rows3 className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Giornaliera</span>
+            </button>
 
-            <div className="flex items-center gap-2.5">
-              <span className="font-mono text-[10px] font-semibold text-[var(--todo-text-muted)] shrink-0">1</span>
-              <input
-                type="range"
-                min={1}
-                max={4}
-                step={1}
-                value={visibleDaysZoom}
-                onChange={(e) => setVisibleDaysZoom(Number(e.target.value))}
-                aria-label="Regola zoom dei giorni da 1 a 4"
-                className="flex-1 accent-[var(--todo-accent)] cursor-pointer"
-              />
-              <span className="font-mono text-[10px] font-semibold text-[var(--todo-text-muted)] shrink-0">4</span>
-
-              <div className="hidden sm:flex items-center gap-1 ml-1">
-                {[1, 2, 3, 4].map((num) => (
-                  <button
-                    key={num}
-                    type="button"
-                    onClick={() => setVisibleDaysZoom(num)}
-                    className={`min-h-[24px] min-w-[24px] rounded-md border text-[11px] font-bold tabular-nums transition-colors ${
-                      visibleDaysZoom === num
-                        ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
-                        : 'border-[var(--todo-chip-border)] bg-[var(--todo-card)] text-[var(--todo-text)] hover:border-[var(--todo-accent)]'
-                    }`}
-                  >
-                    {num}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => setViewMode('weekly')}
+              aria-pressed={viewMode === 'weekly'}
+              style={
+                viewMode === 'weekly'
+                  ? {
+                      background:
+                        'linear-gradient(to bottom, var(--todo-accent), var(--todo-accent-dark))',
+                    }
+                  : undefined
+              }
+              className={`min-h-[32px] inline-flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                viewMode === 'weekly'
+                  ? 'text-white shadow-xs'
+                  : 'text-[var(--todo-text-muted)] hover:text-[var(--todo-text)]'
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Settimanale</span>
+            </button>
           </div>
 
-          {/* Vertical Scrollable Calendar Viewport (no artificial minHeight: days shrink-wrap notes) */}
+          {/* Vertical Scrollable Calendar Viewport (Giornaliera vs Settimanale 2-column 6-card grid) */}
           <div
             ref={scrollContainerRef}
-            className="h-[620px] sm:h-[680px] overflow-y-auto pr-1 space-y-2"
+            className={
+              viewMode === 'weekly'
+                ? 'h-[640px] sm:h-[700px] overflow-y-auto pr-0.5 grid grid-cols-2 gap-1.5 content-start items-start'
+                : 'h-[620px] sm:h-[680px] overflow-y-auto pr-1 space-y-2'
+            }
           >
             {daysList.map((isoDate) => {
               const isToday = isoDate === todayIso;
@@ -819,6 +860,342 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 (acc, p) => acc + (itemsBySlot.get(`${isoDate}|${p.key}`)?.length || 0),
                 0
               );
+
+              if (viewMode === 'weekly') {
+                const populatedPhases = DAY_PHASES.filter(
+                  (p) => (itemsBySlot.get(`${isoDate}|${p.key}`)?.length || 0) > 0
+                );
+                const isDayDropActive = dropTarget?.date === isoDate;
+
+                return (
+                  <article
+                    key={isoDate}
+                    data-today-card={isToday ? 'true' : undefined}
+                    data-org-date={isoDate}
+                    data-org-phase="mattina"
+                    onDragOver={(e) => {
+                      if (!draggedOrgId) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dropTarget?.date !== isoDate) {
+                        setDropTarget({ date: isoDate, phase: 'mattina' });
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (!draggedOrgId) return;
+                      e.preventDefault();
+                      const sourceId =
+                        draggedOrgId || e.dataTransfer.getData('text/plain');
+                      if (sourceId) {
+                        if (
+                          dropTarget?.mergeTargetId &&
+                          dropTarget.mergeTargetId !== sourceId
+                        ) {
+                          onMergeOrganizeItems(sourceId, dropTarget.mergeTargetId);
+                        } else if (
+                          dropTarget?.insertBeforeId &&
+                          dropTarget.insertBeforeId !== sourceId
+                        ) {
+                          onMoveOrReorderOrganizeItem(
+                            sourceId,
+                            isoDate,
+                            dropTarget.phase || 'mattina',
+                            dropTarget.insertBeforeId
+                          );
+                        } else {
+                          onMoveOrReorderOrganizeItem(
+                            sourceId,
+                            isoDate,
+                            dropTarget?.phase || 'mattina',
+                            null
+                          );
+                        }
+                      }
+                      resetOrgDragState();
+                    }}
+                    className={`rounded-lg border flex flex-col p-1.5 transition-colors min-w-0 ${
+                      isDayDropActive
+                        ? 'border-[var(--todo-accent)] bg-[var(--todo-accent-soft)] ring-1 ring-[var(--todo-accent)]'
+                        : isToday
+                          ? 'border-[var(--todo-day-today-border)] bg-[var(--todo-day-today-bg)] ring-1 ring-[var(--todo-accent)]/40'
+                          : 'border-[var(--todo-card-border)] bg-[var(--todo-day-bg)]'
+                    }`}
+                  >
+                    {/* Compact Proportional Header for 2-Column Weekly Grid */}
+                    <div className="flex items-center justify-between gap-1 border-b border-[var(--todo-phase-border)] pb-1 mb-1">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="uppercase font-bold text-[9px] text-[var(--todo-text-muted)] shrink-0">
+                          {weekdayLabel}
+                        </span>
+                        <span className="font-bold text-[10.5px] text-[var(--todo-text)] whitespace-nowrap">
+                          {dateShort}
+                        </span>
+                        {isToday && (
+                          <span className="rounded bg-[var(--todo-accent-dark)] px-1 py-[0.5px] text-[8px] font-bold text-white shrink-0">
+                            Oggi
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openNewNoteModal(isoDate, 'mattina')}
+                          aria-label={`Nuova nota il ${dateShort}`}
+                          title="Nuova nota"
+                          className="h-4 w-4 inline-flex items-center justify-center rounded border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-accent)] hover:opacity-85"
+                        >
+                          <Plus className="h-2.5 w-2.5" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyDayNotes(isoDate)}
+                          aria-label={`Copia note di ${dateShort}`}
+                          title="Copia tutte le note del giorno"
+                          className="h-4 w-4 inline-flex items-center justify-center rounded border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-accent)] hover:opacity-85"
+                        >
+                          {copiedDayIso === isoDate ? (
+                            <Check className="h-2.5 w-2.5" aria-hidden="true" />
+                          ) : (
+                            <Copy className="h-2.5 w-2.5" aria-hidden="true" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPasteModalForDay(isoDate)}
+                          aria-label={`Incolla note in ${dateShort}`}
+                          title="Incolla da appunti"
+                          className="h-4 w-4 inline-flex items-center justify-center rounded border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-accent)] hover:opacity-85"
+                        >
+                          <ClipboardPaste className="h-2.5 w-2.5" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Weekly Notes: NO visible phases, only a small empty gap between different phases */}
+                    {populatedPhases.length === 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => openNewNoteModal(isoDate, 'mattina')}
+                        className="w-full min-h-[26px] flex items-center justify-center gap-1 rounded border border-dashed border-[var(--todo-phase-border)]/70 text-[9.5px] font-medium text-[var(--todo-text-muted)] opacity-60 hover:opacity-100 transition-opacity"
+                      >
+                        <Plus className="h-2.5 w-2.5" aria-hidden="true" />
+                        <span>Aggiungi</span>
+                      </button>
+                    ) : (
+                      <div className="flex flex-col">
+                        {populatedPhases.map((phase, phaseIdx) => {
+                          const slotItems = itemsBySlot.get(`${isoDate}|${phase.key}`) || [];
+                          return (
+                            <div
+                              key={`${isoDate}-w-${phase.key}`}
+                              data-org-date={isoDate}
+                              data-org-phase={phase.key}
+                              className={phaseIdx > 0 ? 'mt-2 space-y-1' : 'space-y-1'}
+                            >
+                              {slotItems.map((item) => {
+                                const isDragged = draggedOrgId === item.id;
+                                const isInsertBefore =
+                                  draggedOrgId !== null &&
+                                  draggedOrgId !== item.id &&
+                                  dropTarget?.insertBeforeId === item.id;
+                                const isMergeTarget =
+                                  draggedOrgId !== null &&
+                                  draggedOrgId !== item.id &&
+                                  dropTarget?.mergeTargetId === item.id;
+                                const catId = resolveCatEmoticonId(item.emoji, item.text);
+                                const hasReminder = Boolean(item.reminderDate && item.reminderTime);
+                                const remShort = hasReminder
+                                  ? `${item.reminderDate!.split('-')[2]}/${item.reminderDate!.split('-')[1]} ${item.reminderTime}`
+                                  : '';
+
+                                return (
+                                  <React.Fragment key={item.id}>
+                                    {draggedOrgId && draggedOrgId !== item.id && (
+                                      <div
+                                        data-org-insert-before={item.id}
+                                        data-org-date={isoDate}
+                                        data-org-phase={phase.key}
+                                        onDragOver={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          setDropTarget({
+                                            date: isoDate,
+                                            phase: phase.key,
+                                            insertBeforeId: item.id,
+                                          });
+                                        }}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          const sourceId =
+                                            draggedOrgId || e.dataTransfer.getData('text/plain');
+                                          if (sourceId && sourceId !== item.id) {
+                                            onMoveOrReorderOrganizeItem(
+                                              sourceId,
+                                              isoDate,
+                                              phase.key,
+                                              item.id
+                                            );
+                                          }
+                                          resetOrgDragState();
+                                        }}
+                                        className="relative z-10 h-2 -my-1 flex items-center"
+                                      >
+                                        <div
+                                          className={`w-full rounded-full transition-all ${
+                                            isInsertBefore
+                                              ? 'h-[2.5px] bg-[var(--todo-accent)]'
+                                              : 'h-[1px] bg-transparent'
+                                          }`}
+                                        />
+                                      </div>
+                                    )}
+
+                                    <div
+                                      data-org-merge-id={item.id}
+                                      data-org-date={isoDate}
+                                      data-org-phase={phase.key}
+                                      draggable
+                                      onDragStart={(e) => {
+                                        setDraggedOrgId(item.id);
+                                        e.dataTransfer.effectAllowed = 'move';
+                                        e.dataTransfer.setData('text/plain', item.id);
+                                      }}
+                                      onDragOver={(e) => {
+                                        if (!draggedOrgId || draggedOrgId === item.id) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setDropTarget({
+                                          date: isoDate,
+                                          phase: phase.key,
+                                          mergeTargetId: item.id,
+                                        });
+                                      }}
+                                      onDrop={(e) => {
+                                        if (!draggedOrgId || draggedOrgId === item.id) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        const sourceId =
+                                          draggedOrgId || e.dataTransfer.getData('text/plain');
+                                        if (sourceId && sourceId !== item.id) {
+                                          onMergeOrganizeItems(sourceId, item.id);
+                                        }
+                                        resetOrgDragState();
+                                      }}
+                                      onDragEnd={resetOrgDragState}
+                                      className={`flex items-start gap-1 rounded-md border px-1 py-[3px] transition-all ${
+                                        isMergeTarget
+                                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-1 ring-[var(--todo-accent)]'
+                                          : 'border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)]'
+                                      } ${isDragged ? 'opacity-45' : ''}`}
+                                    >
+                                      <button
+                                        type="button"
+                                        aria-label={`Trascina "${item.text}"`}
+                                        onPointerDown={(e) => {
+                                          if (e.pointerType === 'mouse') return;
+                                          e.stopPropagation();
+                                          try {
+                                            e.currentTarget.setPointerCapture(e.pointerId);
+                                          } catch {
+                                            // ignore
+                                          }
+                                          dragCursorRef.current = { x: e.clientX, y: e.clientY };
+                                          pointerDragRef.current = { id: item.id, active: true };
+                                          setDraggedOrgId(item.id);
+                                        }}
+                                        className="touch-none h-4 w-3 flex items-center justify-center rounded cursor-grab active:cursor-grabbing shrink-0 text-[var(--todo-text-muted)] mt-[1px]"
+                                      >
+                                        <GripVertical className="h-2.5 w-2.5" aria-hidden="true" />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onUpdateOrganizeItem(item.id, {
+                                            done: !item.done,
+                                            updatedAt: new Date().toISOString(),
+                                          });
+                                        }}
+                                        aria-label={item.done ? 'Da fare' : 'Completata'}
+                                        className="h-4 w-4 flex items-center justify-center rounded shrink-0 text-[var(--todo-accent)] mt-[1px]"
+                                      >
+                                        {item.done ? (
+                                          <CheckCircle2 className="h-3 w-3 text-[var(--todo-accent)]" />
+                                        ) : (
+                                          <Circle className="h-3 w-3 text-[var(--todo-text-muted)] opacity-60" />
+                                        )}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedOrgId(item.id)}
+                                        className="min-w-0 flex-1 text-left flex items-start gap-1 py-[1px]"
+                                      >
+                                        <CatEmoticonIcon
+                                          emoticonId={catId}
+                                          text={item.text}
+                                          variant="fullFace"
+                                          sizeClass="h-4 w-4 mt-[1px]"
+                                        />
+                                        <span
+                                          className={`block text-[10px] font-medium text-[var(--todo-text)] leading-[1.2] break-words ${
+                                            item.done ? 'line-through opacity-55' : ''
+                                          }`}
+                                        >
+                                          {item.text}
+                                        </span>
+                                      </button>
+
+                                      <div className="flex items-center gap-0.5 shrink-0 mt-[1px]">
+                                        {hasReminder && (
+                                          <a
+                                            href={buildGoogleCalendarUrl({
+                                              title: item.text,
+                                              details: `${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text}`,
+                                              date: item.reminderDate!,
+                                              time: item.reminderTime!,
+                                            })}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                            title={`Aggiungi a Google Calendar (${remShort})`}
+                                            aria-label={`Apri Google Calendar per ${item.text}`}
+                                            className="h-4 w-4 inline-flex items-center justify-center rounded border border-[var(--todo-chip-border)] bg-[var(--todo-accent-soft)] text-[var(--todo-accent)] hover:opacity-85"
+                                          >
+                                            <Calendar className="h-2.5 w-2.5" aria-hidden="true" />
+                                          </a>
+                                        )}
+
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDuplicateOrgItem(item);
+                                            setDupDate(item.date);
+                                            setDupPhase(item.phase);
+                                          }}
+                                          aria-label={`Duplica "${item.text}"`}
+                                          title="Duplica in data e fase"
+                                          className="h-4 w-4 inline-flex items-center justify-center rounded border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] text-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)]"
+                                        >
+                                          <CopyPlus className="h-2.5 w-2.5" aria-hidden="true" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </React.Fragment>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </article>
+                );
+              }
 
               return (
                 <article
@@ -1123,7 +1500,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                           emoticonId={catId}
                                           text={item.text}
                                           variant="fullFace"
-                                          sizeClass="h-[22px] w-[22px]"
+                                          sizeClass="h-6 w-6"
                                         />
                                         <span
                                           className={`block text-xs font-medium text-[var(--todo-text)] leading-[1.25] break-words ${
@@ -1153,6 +1530,21 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                           <span className="font-mono tabular-nums">{remShort}</span>
                                         </a>
                                       )}
+
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDuplicateOrgItem(item);
+                                          setDupDate(item.date);
+                                          setDupPhase(item.phase);
+                                        }}
+                                        aria-label={`Duplica "${item.text}"`}
+                                        title="Duplica in data e fase"
+                                        className="h-6 w-6 inline-flex items-center justify-center rounded-md border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] text-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)] shrink-0 transition-colors"
+                                      >
+                                        <CopyPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                                      </button>
 
                                       {isMergeTarget && (
                                         <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
@@ -1217,7 +1609,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             <button
               type="button"
               onClick={() => setTotalDaysCount((c) => c + 7)}
-              className="w-full min-h-[36px] rounded-xl border border-dashed border-[var(--todo-shell-border)] bg-[var(--todo-surface-alt)] text-xs font-semibold text-[var(--todo-text)] hover:opacity-85"
+              className={`${
+                viewMode === 'weekly' ? 'col-span-2' : ''
+              } w-full min-h-[36px] rounded-xl border border-dashed border-[var(--todo-shell-border)] bg-[var(--todo-surface-alt)] text-xs font-semibold text-[var(--todo-text)] hover:opacity-85`}
             >
               Carica altri 7 giorni
             </button>
@@ -1904,6 +2298,119 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 ) : (
                   <span>Aggiungi tutte le note</span>
                 )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Compact Modal: Duplicate Note into Specific Date & Phase */}
+      {duplicateOrgItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="org-duplicate-title"
+          onClick={() => setDuplicateOrgItem(null)}
+        >
+          <div
+            className="w-full max-w-[320px] rounded-2xl bg-[var(--todo-card)] border border-[var(--todo-card-border)] p-3.5 shadow-2xl space-y-2.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <CopyPlus className="h-4 w-4 text-[var(--todo-accent)] shrink-0" aria-hidden="true" />
+                <h3 id="org-duplicate-title" className="text-xs font-bold text-[var(--todo-text)]">
+                  Duplica nota
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicateOrgItem(null)}
+                aria-label="Chiudi"
+                className="h-7 w-7 flex items-center justify-center rounded-lg border border-[var(--todo-note-border)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] shrink-0"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-xl border border-[var(--todo-note-border)] bg-[var(--todo-surface)] p-2">
+              <CatEmoticonIcon
+                emoticonId={duplicateOrgItem.emoji}
+                text={duplicateOrgItem.text}
+                variant="fullFace"
+                sizeClass="h-6 w-6"
+              />
+              <span className="text-xs font-medium text-[var(--todo-text)] break-words leading-snug">
+                {duplicateOrgItem.text}
+              </span>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!dupDate) return;
+                onDuplicateOrganizeItem(
+                  {
+                    text: duplicateOrgItem.text,
+                    emoji: duplicateOrgItem.emoji,
+                    done: duplicateOrgItem.done,
+                    source: duplicateOrgItem.source,
+                    reminderDate: duplicateOrgItem.reminderDate,
+                    reminderTime: duplicateOrgItem.reminderTime,
+                  },
+                  dupDate,
+                  dupPhase
+                );
+                setDuplicateOrgItem(null);
+              }}
+              className="space-y-2"
+            >
+              <label className="block">
+                <span className="block text-[10.5px] font-semibold text-[var(--todo-text-muted)] mb-1">
+                  Data di destinazione
+                </span>
+                <input
+                  type="date"
+                  required
+                  value={dupDate}
+                  onChange={(e) => setDupDate(e.target.value)}
+                  className="block w-full max-w-full min-w-0 min-h-[34px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)]"
+                />
+              </label>
+
+              <div>
+                <span className="block text-[10.5px] font-semibold text-[var(--todo-text-muted)] mb-1">
+                  Fase del giorno
+                </span>
+                <div className="grid grid-cols-2 gap-1">
+                  {DAY_PHASES.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setDupPhase(p.key)}
+                      className={`min-h-[30px] rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors ${
+                        dupPhase === p.key
+                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
+                          : 'border-[var(--todo-chip-border)] bg-[var(--todo-surface)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)]'
+                      }`}
+                    >
+                      {p.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  background:
+                    'linear-gradient(to bottom, var(--todo-accent), var(--todo-accent-dark))',
+                }}
+                className="w-full min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+              >
+                <CopyPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Conferma e duplica</span>
               </button>
             </form>
           </div>

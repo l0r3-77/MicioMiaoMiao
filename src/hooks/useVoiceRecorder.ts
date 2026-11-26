@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { compactAudioBlob, encodeMono8BitWavFromSamples } from '../utils/audioCompact';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import {
   createTranscribeTraceId,
@@ -66,80 +67,18 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-/**
- * Fallback WAV compatto: 10 kHz mono 8-bit PCM (~10 KB/s, meno di 1/3 rispetto ai 32 KB/s del WAV 16kHz 16-bit).
- * Usato solo se MediaRecorder compresso (Opus/AAC ~2.5 KB/s) non è disponibile.
- */
-function encodeCompactWavMono(
-  chunks: Float32Array[],
-  inputSampleRate: number
-): { blob: Blob; peak: number } {
+function encodeCompactWavMono(chunks: Float32Array[], inputSampleRate: number): Blob {
   let totalLength = 0;
-  let peak = 0;
   for (const chunk of chunks) {
     totalLength += chunk.length;
-    for (let k = 0; k < chunk.length; k++) {
-      const abs = Math.abs(chunk[k]);
-      if (abs > peak) peak = abs;
-    }
   }
-
   const merged = new Float32Array(totalLength);
   let offset = 0;
   for (const chunk of chunks) {
     merged.set(chunk, offset);
     offset += chunk.length;
   }
-
-  const gain = peak > 0.002 && peak < 0.25 ? Math.min(6, 0.45 / peak) : 1;
-
-  const targetRate = 10000;
-  const ratio = inputSampleRate / targetRate;
-  const outputLength = Math.max(1, Math.floor(merged.length / ratio));
-  const buffer = new ArrayBuffer(44 + outputLength);
-  const view = new DataView(buffer);
-
-  const writeString = (pos: number, str: string) => {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(pos + i, str.charCodeAt(i));
-    }
-  };
-
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + outputLength, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // mono
-  view.setUint32(24, targetRate, true);
-  view.setUint32(28, targetRate, true); // 1 byte per sample
-  view.setUint16(32, 1, true); // block align
-  view.setUint16(34, 8, true); // 8-bit unsigned PCM
-  writeString(36, 'data');
-  view.setUint32(40, outputLength, true);
-
-  let writeOffset = 44;
-  for (let i = 0; i < outputLength; i++) {
-    const startIdx = Math.floor(i * ratio);
-    const endIdx = Math.min(merged.length, Math.floor((i + 1) * ratio));
-    let sum = 0;
-    let count = 0;
-    for (let j = startIdx; j < endIdx; j++) {
-      sum += merged[j];
-      count++;
-    }
-    const sample =
-      (count > 0 ? sum / count : merged[Math.min(merged.length - 1, startIdx)] || 0) * gain;
-    const clamped = Math.max(-1, Math.min(1, sample));
-    view.setUint8(writeOffset, Math.round((clamped + 1) * 127.5));
-    writeOffset += 1;
-  }
-
-  return {
-    blob: new Blob([buffer], { type: 'audio/wav' }),
-    peak,
-  };
+  return encodeMono8BitWavFromSamples(merged, inputSampleRate, 6000);
 }
 
 const BAR_COUNT = 24;
@@ -319,20 +258,26 @@ export function useVoiceRecorder() {
         firstTrackReadyState: stream.getAudioTracks()[0]?.readyState || 'none',
       });
 
-      // Start compressed MediaRecorder first (20 kbps Opus/AAC -> ~2.5 KB/s, >10x smaller than WAV!)
+      // Start ultra-compact speech MediaRecorder (8 kbps Opus/AAC -> ~1.0-1.5 KB/s)
       let mediaRecorderActive = false;
       if (typeof MediaRecorder !== 'undefined') {
         try {
           const preferredMime = getSupportedMimeType();
           let recorder: MediaRecorder;
           try {
-            const opts: MediaRecorderOptions = { audioBitsPerSecond: 20000 };
+            const opts: MediaRecorderOptions = { audioBitsPerSecond: 8000 };
             if (preferredMime) opts.mimeType = preferredMime;
             recorder = new MediaRecorder(stream, opts);
           } catch {
-            recorder = preferredMime
-              ? new MediaRecorder(stream, { mimeType: preferredMime })
-              : new MediaRecorder(stream);
+            try {
+              const optsFallback: MediaRecorderOptions = { audioBitsPerSecond: 12000 };
+              if (preferredMime) optsFallback.mimeType = preferredMime;
+              recorder = new MediaRecorder(stream, optsFallback);
+            } catch {
+              recorder = preferredMime
+                ? new MediaRecorder(stream, { mimeType: preferredMime })
+                : new MediaRecorder(stream);
+            }
           }
           recorder.ondataavailable = (event: BlobEvent) => {
             if (event.data && event.data.size > 0) {
@@ -415,7 +360,7 @@ export function useVoiceRecorder() {
       const errName = (err as { name?: string })?.name;
       if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
         setError(
-          'Accesso al microfono negato. Abilita il microfono nelle impostazioni di Safari / iPhone e riprova.'
+          'Accesso al microfono negato. In Safari/iPhone imposta Microfono su «Consenti» (icona aA nella barra indirizzi o Impostazioni Safari) per non doverlo autorizzare ogni volta.'
         );
       } else if (errName === 'NotFoundError') {
         setError('Nessun microfono rilevato su questo dispositivo.');
@@ -480,15 +425,17 @@ export function useVoiceRecorder() {
       ...diagnostics,
     });
 
-    // Prefer compressed Opus/AAC MediaRecorder audio (~20 kbps, ~10x smaller than WAV!)
     let finalBlob: Blob | null = null;
     let finalMime = compressedMime;
 
     if (compressedBlob && compressedBlob.size > 512) {
-      finalBlob = compressedBlob;
-      finalMime = compressedMime.split(';')[0].trim() || compressedMime;
+      const compacted = await compactAudioBlob(compressedBlob, rawDuration);
+      finalBlob = compacted.blob;
+      finalMime = compacted.wasCompacted
+        ? compacted.mimeType
+        : compressedMime.split(';')[0].trim() || compressedMime;
     } else if (pcmChunks.length > 0) {
-      const { blob: compactWav } = encodeCompactWavMono(pcmChunks, sampleRate);
+      const compactWav = encodeCompactWavMono(pcmChunks, sampleRate);
       if (compactWav.size > 128) {
         finalBlob = compactWav;
         finalMime = 'audio/wav';
