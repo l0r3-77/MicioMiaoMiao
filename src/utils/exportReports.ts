@@ -13,6 +13,7 @@ export type ExportScope = 'all' | 'stats' | 'notes';
 
 export interface ExportStatsPayload {
   periodLabel: string;
+  activeFiltersSummary?: string;
   totalEntries: number;
   activeDaysCount: number;
   avgValenceScore: number | null;
@@ -118,6 +119,9 @@ export function exportToExcel(scope: ExportScope, payload: ExportStatsPayload) {
     const summaryData = [
       ['Report Statistiche MicioMiao'],
       ['Periodo filtro', payload.periodLabel],
+      ...(payload.activeFiltersSummary
+        ? [['Filtri applicati', payload.activeFiltersSummary]]
+        : []),
       ['Appunti analizzati', payload.totalEntries],
       ['Giorni con note', payload.activeDaysCount],
       [
@@ -199,8 +203,10 @@ async function svgElementToPngDataUrl(svg: SVGSVGElement): Promise<{
     const serializer = new XMLSerializer();
     const cloned = svg.cloneNode(true) as SVGSVGElement;
     const rect = svg.getBoundingClientRect();
-    const w = Math.max(rect.width || 600, 320);
-    const h = Math.max(rect.height || 200, 120);
+    const vbWidth = svg.viewBox?.baseVal?.width || 600;
+    const vbHeight = svg.viewBox?.baseVal?.height || 200;
+    const w = rect.width > 10 ? rect.width : vbWidth;
+    const h = rect.height > 10 ? rect.height : vbHeight;
     cloned.setAttribute('width', String(w));
     cloned.setAttribute('height', String(h));
     if (!cloned.getAttribute('xmlns')) {
@@ -271,8 +277,24 @@ export async function exportToPdf(scope: ExportScope, payload: ExportStatsPayloa
   };
 
   // Document Header
+  const scopeLabel =
+    scope === 'notes'
+      ? 'Note giornaliere'
+      : scope === 'stats'
+        ? 'Grafici e statistiche'
+        : 'Statistiche, grafici e note complete';
+  const filterInfo = payload.activeFiltersSummary
+    ? ` | Filtri: ${payload.activeFiltersSummary}`
+    : '';
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  const headerMetaLines = doc.splitTextToSize(
+    `Sezione: ${scopeLabel} | Periodo: ${payload.periodLabel}${filterInfo}`,
+    usableWidth - 8
+  );
+  const headerBoxHeight = Math.max(20, 12 + headerMetaLines.length * 4.5);
   doc.setFillColor(250, 245, 232);
-  doc.roundedRect(margin, y - 5, usableWidth, 20, 3, 3, 'F');
+  doc.roundedRect(margin, y - 5, usableWidth, headerBoxHeight, 3, 3, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.setTextColor(28, 25, 23);
@@ -280,14 +302,8 @@ export async function exportToPdf(scope: ExportScope, payload: ExportStatsPayloa
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);
   doc.setTextColor(87, 83, 78);
-  const scopeLabel =
-    scope === 'notes'
-      ? 'Note giornaliere'
-      : scope === 'stats'
-        ? 'Grafici e statistiche'
-        : 'Statistiche, grafici e note complete';
-  doc.text(`Sezione: ${scopeLabel}   |   Periodo: ${payload.periodLabel}`, margin + 4, y + 10);
-  y += 22;
+  doc.text(headerMetaLines, margin + 4, y + 10);
+  y += headerBoxHeight + 3;
 
   if (scope === 'all' || scope === 'stats') {
     addSectionTitle('Riepilogo Statistiche');
@@ -311,12 +327,12 @@ export async function exportToPdf(scope: ExportScope, payload: ExportStatsPayloa
     }
     y += 2;
 
-    addSectionTitle('Distribuzione Colori & Valenza');
+    addSectionTitle('Colori & Valenza Emotiva (+2 a -2)');
     doc.setFontSize(9.5);
-    for (const c of payload.colorRows) {
+    for (const v of payload.valenceRows) {
       ensureSpace(6);
       doc.text(
-        `• ${c.label} (${c.valenceLabel}): ${c.count} appunti (${c.pct}%)`,
+        `• ${v.scoreLabel} ${v.label} (${v.colors}): ${v.count} appunti (${v.pct}%)`,
         margin + 2,
         y
       );

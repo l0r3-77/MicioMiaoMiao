@@ -25,7 +25,6 @@ import {
   type DayPeriod,
 } from '../utils/dateUtils';
 import {
-  buildNotesExportRows,
   exportToExcel,
   exportToPdf,
   type ExportScope,
@@ -55,22 +54,19 @@ interface StatsAndChartsViewProps {
 }
 
 type StatsPeriod = 'single_day' | '7d' | '30d' | 'month' | 'all' | 'custom';
-type TimelineChartType = 'bars' | 'line' | 'valence';
-type ColorChartType = 'donut' | 'valence';
+type TimelineChartType = 'line' | 'valence';
 type HourlyChartType = 'hours24' | 'periodValence';
 type SensationTone = ColorValence;
 
 interface StatsPreferences {
   timelineChartType: TimelineChartType;
-  colorChartType: ColorChartType;
   hourlyChartType: HourlyChartType;
 }
 
 const PREFS_STORAGE_KEY = 'agendavoce_stats_prefs_v2';
 
 const DEFAULT_PREFS: StatsPreferences = {
-  timelineChartType: 'bars',
-  colorChartType: 'donut',
+  timelineChartType: 'line',
   hourlyChartType: 'hours24',
 };
 
@@ -78,8 +74,15 @@ function loadPreferences(): StatsPreferences {
   try {
     const raw = localStorage.getItem(PREFS_STORAGE_KEY);
     if (!raw) return DEFAULT_PREFS;
-    const parsed = JSON.parse(raw) as Partial<StatsPreferences>;
-    return { ...DEFAULT_PREFS, ...parsed };
+    const parsed = JSON.parse(raw) as Partial<{
+      timelineChartType: string;
+      hourlyChartType: string;
+    }>;
+    const timelineChartType: TimelineChartType =
+      parsed.timelineChartType === 'valence' ? 'valence' : 'line';
+    const hourlyChartType: HourlyChartType =
+      parsed.hourlyChartType === 'periodValence' ? 'periodValence' : 'hours24';
+    return { timelineChartType, hourlyChartType };
   } catch {
     return DEFAULT_PREFS;
   }
@@ -90,23 +93,181 @@ interface FlatEntry {
   entry: NoteEntry;
   period: DayPeriod;
   hour: number;
+  minute: number;
   colorValence: ColorValence;
   colorScore: number;
+}
+
+const VALENCE_TO_SCORE: Record<ColorValence, number> = {
+  very_positive: 2,
+  positive: 1,
+  middle: 0,
+  mild_negative: -1,
+  negative: -2,
+};
+
+function scoreToValence(score: number): ColorValence {
+  if (score >= 1.45) return 'very_positive';
+  if (score >= 0.45) return 'positive';
+  if (score >= -0.45) return 'middle';
+  if (score >= -1.45) return 'mild_negative';
+  return 'negative';
+}
+
+function scoreToHex(score: number): string {
+  return COLOR_VALENCE_META[scoreToValence(score)].hex;
 }
 
 function normalizeBulletText(raw: string): string {
   return raw.trim().replace(/\s+/g, ' ');
 }
 
-function extractSensationCategory(bullet: string): string {
+function canonicalizeAreaName(rawPrefix: string): string {
+  const lower = rawPrefix
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (/^bisogn/.test(lower)) return 'Bisogno';
+  if (/^umor/.test(lower)) return 'Umore';
+  if (/^stress/.test(lower) || /^tension/.test(lower) || /^ansia/.test(lower)) return 'Stress';
+  if (/^energi/.test(lower) || /^stanchezz/.test(lower)) return 'Energia';
+  if (/^focus/.test(lower) || /^concentraz/.test(lower) || /^attenzion/.test(lower)) return 'Focus';
+  if (/^sensazion/.test(lower) || /^stato/.test(lower) || /^emozion/.test(lower)) return 'Sensazione';
+
+  const trimmed = rawPrefix.trim();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+}
+
+function splitSensationAreaAndBody(bullet: string): { area: string; body: string } {
   const colonIdx = bullet.indexOf(':');
-  if (colonIdx > 0 && colonIdx <= 22) {
+  if (colonIdx > 0 && colonIdx <= 24) {
     const prefix = bullet.slice(0, colonIdx).trim();
-    if (prefix) {
-      return prefix.charAt(0).toUpperCase() + prefix.slice(1).toLowerCase();
+    const rest = bullet.slice(colonIdx + 1).trim();
+    if (prefix && rest) {
+      const cleanedBody = rest.charAt(0).toUpperCase() + rest.slice(1);
+      return { area: canonicalizeAreaName(prefix), body: cleanedBody };
     }
   }
-  return 'Sensazione';
+  return { area: 'Sensazione', body: bullet };
+}
+
+const ITALIAN_STOPWORDS = new Set([
+  'il',
+  'lo',
+  'la',
+  'i',
+  'gli',
+  'le',
+  'un',
+  'uno',
+  'una',
+  'di',
+  'del',
+  'dello',
+  'della',
+  'dei',
+  'degli',
+  'delle',
+  'a',
+  'al',
+  'allo',
+  'alla',
+  'da',
+  'dal',
+  'dallo',
+  'dalla',
+  'in',
+  'nel',
+  'nello',
+  'nella',
+  'con',
+  'su',
+  'per',
+  'tra',
+  'fra',
+  'e',
+  'ed',
+  'o',
+  'po',
+  'poco',
+  'molto',
+  'abbastanza',
+  'leggermente',
+  'lievemente',
+  'piuttosto',
+  'davvero',
+  'proprio',
+  'tanto',
+  'fare',
+  'farsi',
+  'prendere',
+  'prendersi',
+  'avere',
+  'essere',
+  'sentire',
+  'sentirsi',
+  'mi',
+  'ti',
+  'si',
+  'ci',
+  'livello',
+  'stato',
+  'senso',
+]);
+
+function stemItalianToken(tok: string): string {
+  let t = tok;
+  if (t.length > 6 && t.endsWith('mente')) {
+    t = t.slice(0, -5);
+  } else if (t.length > 6 && (t.endsWith('zione') || t.endsWith('zioni'))) {
+    t = t.slice(0, -5);
+  } else if (t.length > 5 && (t.endsWith('ezza') || t.endsWith('ezze'))) {
+    t = t.slice(0, -4);
+  }
+  if (t.length >= 5 && /[aeio]$/.test(t)) {
+    t = t.slice(0, -1);
+  }
+  return t;
+}
+
+function tokenizeForSimilarity(text: string): string[] {
+  const normalized = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[-_/’']/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .trim();
+
+  const rawTokens = normalized.split(/\s+/).filter(Boolean);
+  const filtered = rawTokens.filter((tok) => !ITALIAN_STOPWORDS.has(tok));
+  const base = filtered.length > 0 ? filtered : rawTokens;
+  return Array.from(new Set(base.map(stemItalianToken))).sort();
+}
+
+function areDescriptionsVerySimilar(tokensA: string[], tokensB: string[]): boolean {
+  if (tokensA.length === 0 || tokensB.length === 0) return false;
+  if (tokensA.join('|') === tokensB.join('|')) return true;
+
+  const setA = new Set(tokensA);
+  const setB = new Set(tokensB);
+  let intersection = 0;
+  for (const t of setA) {
+    if (setB.has(t)) intersection++;
+  }
+  if (intersection === 0) return false;
+
+  const union = setA.size + setB.size - intersection;
+  const jaccard = intersection / union;
+  if (jaccard >= 0.65) return true;
+
+  const minSize = Math.min(setA.size, setB.size);
+  if (minSize >= 1 && intersection === minSize && Math.max(setA.size, setB.size) <= minSize + 1) {
+    return true;
+  }
+  return false;
 }
 
 function classifySensationTone(bullet: string, entryColor?: NoteColor): SensationTone {
@@ -118,7 +279,9 @@ function classifySensationTone(bullet: string, entryColor?: NoteColor): Sensatio
   ) {
     return entryColor === 'light_red' ? 'mild_negative' : 'negative';
   }
-  if (/stanc|lieve|legger|pausa|riposo|scaric|teso|tesa|difficil|basso|bassa|\bmale\b/.test(lower)) {
+  if (
+    /stanc|lieve|legger|pausa|riposo|scaric|teso|tesa|difficil|basso|bassa|\bmale\b/.test(lower)
+  ) {
     return entryColor === 'red' || entryColor === 'anthracite' ? 'negative' : 'mild_negative';
   }
   if (
@@ -139,6 +302,74 @@ function classifySensationTone(bullet: string, entryColor?: NoteColor): Sensatio
     return NOTE_COLORS[entryColor].valence;
   }
   return 'middle';
+}
+
+interface UnifiedSensationCluster {
+  area: string;
+  displayText: string;
+  fullText: string;
+  tokens: string[];
+  count: number;
+  scoreSum: number;
+  avgScore: number;
+  tone: SensationTone;
+  variants: Map<string, number>;
+}
+
+function buildUnifiedSensationClusters(
+  items: Array<{ rawText: string; area: string; body: string; tone: SensationTone }>
+): UnifiedSensationCluster[] {
+  const clusters: UnifiedSensationCluster[] = [];
+
+  for (const item of items) {
+    const score = VALENCE_TO_SCORE[item.tone];
+    const tokens = tokenizeForSimilarity(item.body);
+
+    const match = clusters.find((c) => {
+      if (c.area !== item.area) return false;
+      const avg = c.scoreSum / c.count;
+      // Avoid merging opposite polarities (e.g. +2 vs -2)
+      if (Math.abs(avg - score) > 1.2) return false;
+      return areDescriptionsVerySimilar(c.tokens, tokens);
+    });
+
+    if (match) {
+      match.count += 1;
+      match.scoreSum += score;
+      match.avgScore = match.scoreSum / match.count;
+      match.tone = scoreToValence(match.avgScore);
+      match.variants.set(item.body, (match.variants.get(item.body) || 0) + 1);
+    } else {
+      const variants = new Map<string, number>();
+      variants.set(item.body, 1);
+      clusters.push({
+        area: item.area,
+        displayText: item.body,
+        fullText: item.rawText,
+        tokens,
+        count: 1,
+        scoreSum: score,
+        avgScore: score,
+        tone: item.tone,
+        variants,
+      });
+    }
+  }
+
+  for (const c of clusters) {
+    // Pick the most frequent concise variant as display label
+    const sortedVariants = Array.from(c.variants.entries()).sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].length - b[0].length;
+    });
+    const bestBody = sortedVariants[0]?.[0] || c.displayText;
+    c.displayText = bestBody;
+    c.fullText = c.area === 'Sensazione' ? bestBody : `${c.area}: ${bestBody}`;
+    c.avgScore = c.scoreSum / c.count;
+    c.tone = scoreToValence(c.avgScore);
+  }
+
+  return clusters;
 }
 
 export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
@@ -212,12 +443,6 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     return { start: '0000-01-01', end: '9999-12-31', label: 'Tutto lo storico' };
   }, [periodFilter, singleDayDate, customStartDate, customEndDate, todayISO]);
 
-  const toggleSingleColor = (color: NoteColor) => {
-    setSelectedColors((prev) =>
-      prev.includes(color) ? prev.filter((c) => c !== color) : [...prev, color]
-    );
-  };
-
   const applyValencePreset = (
     preset: 'all' | 'very_positive' | 'positive' | 'middle' | 'mild_negative' | 'negative'
   ) => {
@@ -257,7 +482,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     ) {
       return 'negative';
     }
-    return 'custom';
+    return 'all';
   }, [selectedColors]);
 
   const flatEntries = useMemo<FlatEntry[]>(() => {
@@ -280,8 +505,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           if (!matchesText) continue;
         }
 
-        const parsedHour = Number((entry.time || '09:00').split(':')[0]);
+        const timeParts = (entry.time || '09:00').split(':');
+        const parsedHour = Number(timeParts[0]);
+        const parsedMin = Number(timeParts[1]);
         const hour = Number.isFinite(parsedHour) ? Math.max(0, Math.min(23, parsedHour)) : 9;
+        const minute = Number.isFinite(parsedMin) ? Math.max(0, Math.min(59, parsedMin)) : 0;
         const meta = NOTE_COLORS[safeColor];
 
         result.push({
@@ -289,6 +517,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           entry: { ...entry, color: safeColor },
           period: dp,
           hour,
+          minute,
           colorValence: meta.valence,
           colorScore: meta.valenceScore,
         });
@@ -304,7 +533,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     return new Set(flatEntries.map((item) => item.date)).size;
   }, [flatEntries]);
 
-  // Color distribution across the 6 colors
+  // Color distribution across the 6 colors (still tracked for topColor & export)
   const colorStats = useMemo(() => {
     const counts: Record<NoteColor, number> = {
       celeste: 0,
@@ -365,7 +594,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     return usedColorStats[0] || null;
   }, [usedColorStats]);
 
-  // Time-of-day stats (Pomeriggio 13:30–18:30, Sera 18:31–23:59)
+  // Time-of-day stats with area score bars instead of exact synthesized phrases
   const dayPeriodStats = useMemo(() => {
     const periods: DayPeriod[] = ['mattina', 'pomeriggio', 'sera', 'notte'];
     return periods.map((p) => {
@@ -377,20 +606,41 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         mild_negative: 0,
         negative: 0,
       };
-      const sensationCounts = new Map<string, number>();
+      const areaStatsMap = new Map<string, { count: number; scoreSum: number }>();
 
       for (const item of items) {
         valenceCounts[item.colorValence]++;
         for (const b of item.entry.bullets) {
           const clean = normalizeBulletText(b);
-          if (clean) sensationCounts.set(clean, (sensationCounts.get(clean) || 0) + 1);
+          if (!clean) continue;
+          const { area } = splitSensationAreaAndBody(clean);
+          const tone = classifySensationTone(clean, item.entry.color);
+          const score = VALENCE_TO_SCORE[tone];
+          const prev = areaStatsMap.get(area) || { count: 0, scoreSum: 0 };
+          prev.count += 1;
+          prev.scoreSum += score;
+          areaStatsMap.set(area, prev);
         }
       }
 
-      const topSensations = Array.from(sensationCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([text, count]) => ({ text, count }));
+      const topAreas = Array.from(areaStatsMap.entries())
+        .sort((a, b) => {
+          if (b[1].count !== a[1].count) return b[1].count - a[1].count;
+          return b[1].scoreSum / b[1].count - a[1].scoreSum / a[1].count;
+        })
+        .slice(0, 4)
+        .map(([area, st]) => {
+          const avgScore = st.scoreSum / st.count;
+          const valence = scoreToValence(avgScore);
+          return {
+            area,
+            count: st.count,
+            avgScore,
+            valence,
+            colorHex: COLOR_VALENCE_META[valence].hex,
+            scoreLabel: COLOR_VALENCE_META[valence].scoreLabel,
+          };
+        });
 
       return {
         period: p,
@@ -398,7 +648,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         count: items.length,
         pct: flatEntries.length ? Math.round((items.length / flatEntries.length) * 100) : 0,
         valenceCounts,
-        topSensations,
+        topAreas,
       };
     });
   }, [flatEntries]);
@@ -437,7 +687,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     return Math.max(1, ...hourlyCounts.map((h) => h.count));
   }, [hourlyCounts]);
 
-  // Daily timeline buckets (scores in [-2, +1])
+  // Daily timeline buckets (for multi-day views & exports)
   const timelineBuckets = useMemo(() => {
     if (flatEntries.length === 0) return [];
     const byDate = new Map<string, FlatEntry[]>();
@@ -461,13 +711,6 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     return Array.from(byDate.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, items]) => {
-        const colorSegments = NOTE_COLOR_LIST.map((col) => ({
-          color: col.key,
-          hex: col.hex,
-          label: col.label,
-          count: items.filter((i) => i.entry.color === col.key).length,
-        })).filter((s) => s.count > 0);
-
         const veryPosCount = items.filter((i) => i.colorValence === 'very_positive').length;
         const posCount = items.filter((i) => i.colorValence === 'positive').length;
         const midCount = items.filter((i) => i.colorValence === 'middle').length;
@@ -482,12 +725,16 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           .map(normalizeBulletText)
           .find(Boolean);
 
+        const parts = date.split('-');
+        const ddmm = parts.length === 3 ? `${parts[2]}/${parts[1]}` : date;
+
         return {
+          key: date,
           date,
           shortLabel: formatItalianDateShort(date),
-          dayNum: date.split('-')[2],
+          axisLabel: ddmm,
+          dayNum: parts[2] || date,
           total: items.length,
-          colorSegments,
           veryPosCount,
           posCount,
           midCount,
@@ -499,56 +746,144 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       });
   }, [flatEntries, periodFilter, dateRange]);
 
+  // Single-day chronological slots for hourly horizontal progression
+  const singleDayTimelineSlots = useMemo(() => {
+    if (periodFilter !== 'single_day' || flatEntries.length === 0) return [];
+    const byTime = new Map<string, FlatEntry[]>();
+    for (const item of flatEntries) {
+      const timeKey = item.entry.time || `${String(item.hour).padStart(2, '0')}:00`;
+      const arr = byTime.get(timeKey) || [];
+      arr.push(item);
+      byTime.set(timeKey, arr);
+    }
+    return Array.from(byTime.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([timeStr, items]) => {
+        const first = items[0];
+        const hourFloat = first.hour + first.minute / 60;
+        const veryPosCount = items.filter((i) => i.colorValence === 'very_positive').length;
+        const posCount = items.filter((i) => i.colorValence === 'positive').length;
+        const midCount = items.filter((i) => i.colorValence === 'middle').length;
+        const mildNegCount = items.filter((i) => i.colorValence === 'mild_negative').length;
+        const negCount = items.filter((i) => i.colorValence === 'negative').length;
+        const scoreSum = items.reduce((acc, i) => acc + i.colorScore, 0);
+        const avgScore = scoreSum / items.length;
+        const topBullet = items
+          .flatMap((i) => i.entry.bullets)
+          .map(normalizeBulletText)
+          .find(Boolean);
+        return {
+          key: `${first.date}@${timeStr}`,
+          date: first.date,
+          shortLabel: `${formatItalianDateShort(first.date)} · ${timeStr}`,
+          axisLabel: timeStr,
+          hourFloat,
+          total: items.length,
+          veryPosCount,
+          posCount,
+          midCount,
+          mildNegCount,
+          negCount,
+          avgScore,
+          topBullet: topBullet || null,
+        };
+      });
+  }, [periodFilter, flatEntries]);
+
+  const activeTimelineItems =
+    periodFilter === 'single_day' ? singleDayTimelineSlots : timelineBuckets;
+
   const maxTimelineTotal = useMemo(() => {
-    return Math.max(1, ...timelineBuckets.map((b) => b.total));
-  }, [timelineBuckets]);
+    return Math.max(1, ...activeTimelineItems.map((b) => b.total));
+  }, [activeTimelineItems]);
 
   const activeBucket = useMemo(() => {
-    if (timelineBuckets.length === 0) return null;
+    if (activeTimelineItems.length === 0) return null;
     if (selectedTimelineKey) {
-      const match = timelineBuckets.find((b) => b.date === selectedTimelineKey);
+      const match = activeTimelineItems.find((b) => b.key === selectedTimelineKey);
       if (match) return match;
     }
     return (
-      [...timelineBuckets].reverse().find((b) => b.total > 0) ||
-      timelineBuckets[timelineBuckets.length - 1]
+      [...activeTimelineItems].reverse().find((b) => b.total > 0) ||
+      activeTimelineItems[activeTimelineItems.length - 1]
     );
-  }, [timelineBuckets, selectedTimelineKey]);
+  }, [activeTimelineItems, selectedTimelineKey]);
 
-  // SVG line chart points on scale [-2, +2]
+  // SVG horizontal line chart geometry (hours for single day, days for multi-day)
   const lineChartGeometry = useMemo(() => {
+    const width = 600;
+    const height = 186;
+    const padX = 34;
+    const padRight = 18;
+    const padY = 16;
+    const padBottom = 34;
+    const usableW = width - padX - padRight;
+    const usableH = height - padY - padBottom;
+    const scoreToY = (s: number) => padY + ((2 - Math.max(-2, Math.min(2, s))) / 4) * usableH;
+
+    if (periodFilter === 'single_day') {
+      const points = singleDayTimelineSlots.map((slot) => {
+        const x = padX + (Math.max(0, Math.min(24, slot.hourFloat)) / 24) * usableW;
+        const y = scoreToY(slot.avgScore);
+        return {
+          x,
+          y,
+          score: slot.avgScore,
+          color: scoreToHex(slot.avgScore),
+          bucket: slot,
+        };
+      });
+
+      const hourTicks = [0, 6, 9, 12, 15, 18, 21, 24].map((h) => ({
+        x: padX + (h / 24) * usableW,
+        label: h === 24 ? '24:00' : `${String(h).padStart(2, '0')}:00`,
+      }));
+
+      const polyline = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const baseY = scoreToY(-2);
+      const areaPath =
+        points.length > 1
+          ? `M ${points[0].x.toFixed(1)} ${baseY.toFixed(1)} ` +
+            points.map((p) => `L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') +
+            ` L ${points[points.length - 1].x.toFixed(1)} ${baseY.toFixed(1)} Z`
+          : '';
+
+      return { width, height, padX, padRight, scoreToY, points, polyline, areaPath, xTicks: hourTicks };
+    }
+
     const scoredIndices = timelineBuckets
       .map((b, idx) => ({ bucket: b, idx }))
       .filter((x) => x.bucket.avgScore !== null);
 
-    if (scoredIndices.length === 0) return { points: [], polyline: '', areaPath: '' };
-
-    const width = 600;
-    const height = 160;
-    const padX = 28;
-    const padY = 16;
-    const usableW = width - padX * 2;
-    const usableH = height - padY * 2;
     const denom = Math.max(1, timelineBuckets.length - 1);
-
-    const scoreToY = (s: number) => padY + ((2 - Math.max(-2, Math.min(2, s))) / 4) * usableH;
-
     const points = scoredIndices.map(({ bucket, idx }) => {
-      const x = timelineBuckets.length === 1 ? width / 2 : padX + (idx / denom) * usableW;
+      const x = timelineBuckets.length === 1 ? padX + usableW / 2 : padX + (idx / denom) * usableW;
       const score = bucket.avgScore ?? 0;
       const y = scoreToY(score);
-      const color =
-        score >= 1.35
-          ? '#0EA5E9'
-          : score >= 0.4
-            ? '#7DD3FC'
-            : score >= -0.4
-              ? '#F59E0B'
-              : score >= -1.4
-                ? '#FB7185'
-                : '#EF4444';
-      return { x, y, score, color, bucket };
+      return { x, y, score, color: scoreToHex(score), bucket };
     });
+
+    // Evenly spaced day labels along X-axis
+    const xTicks: Array<{ x: number; label: string }> = [];
+    const totalDays = timelineBuckets.length;
+    if (totalDays > 0) {
+      if (totalDays === 1) {
+        xTicks.push({ x: padX + usableW / 2, label: timelineBuckets[0].axisLabel });
+      } else {
+        const maxTicks = totalDays <= 8 ? totalDays : 7;
+        const chosenIndices = new Set<number>();
+        for (let t = 0; t < maxTicks; t++) {
+          const idx = Math.round((t / (maxTicks - 1)) * (totalDays - 1));
+          chosenIndices.add(idx);
+        }
+        for (const idx of Array.from(chosenIndices).sort((a, b) => a - b)) {
+          xTicks.push({
+            x: padX + (idx / denom) * usableW,
+            label: timelineBuckets[idx].axisLabel,
+          });
+        }
+      }
+    }
 
     const polyline = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
     const baseY = scoreToY(-2);
@@ -559,27 +894,29 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           ` L ${points[points.length - 1].x.toFixed(1)} ${baseY.toFixed(1)} Z`
         : '';
 
-    return { points, polyline, areaPath };
-  }, [timelineBuckets]);
+    return { width, height, padX, padRight, scoreToY, points, polyline, areaPath, xTicks };
+  }, [periodFilter, singleDayTimelineSlots, timelineBuckets]);
 
-  // Sensations & Color Correlations
+  // Sensations analytics: unified similar phrases, grouped by area, ordered +2 to -2 vertically
   const sensationAnalytics = useMemo(() => {
-    const phraseMap = new Map<string, { count: number; tone: SensationTone }>();
-    const categoryMap = new Map<string, number>();
-    const colorCorrelationMap = new Map<NoteColor, Map<string, number>>();
+    const rawItems: Array<{
+      rawText: string;
+      area: string;
+      body: string;
+      tone: SensationTone;
+      color: NoteColor;
+    }> = [];
 
     let veryPositiveCount = 0;
     let positiveCount = 0;
     let middleCount = 0;
     let mildNegativeCount = 0;
     let negativeCount = 0;
-    let totalBullets = 0;
 
     for (const item of flatEntries) {
       for (const rawBullet of item.entry.bullets) {
         const clean = normalizeBulletText(rawBullet);
         if (!clean) continue;
-        totalBullets++;
         const tone = classifySensationTone(clean, item.entry.color);
         if (tone === 'very_positive') veryPositiveCount++;
         else if (tone === 'positive') positiveCount++;
@@ -587,80 +924,112 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         else if (tone === 'mild_negative') mildNegativeCount++;
         else negativeCount++;
 
-        const existing = phraseMap.get(clean);
-        if (existing) {
-          existing.count++;
-        } else {
-          phraseMap.set(clean, { count: 1, tone });
-        }
-
-        const cat = extractSensationCategory(clean);
-        categoryMap.set(cat, (categoryMap.get(cat) || 0) + 1);
-
-        if (!colorCorrelationMap.has(item.entry.color)) {
-          colorCorrelationMap.set(item.entry.color, new Map());
-        }
-        const cMap = colorCorrelationMap.get(item.entry.color)!;
-        cMap.set(clean, (cMap.get(clean) || 0) + 1);
+        const { area, body } = splitSensationAreaAndBody(clean);
+        rawItems.push({ rawText: clean, area, body, tone, color: item.entry.color });
       }
     }
 
-    const topPhrases = Array.from(phraseMap.entries())
-      .map(([text, meta]) => ({ text, count: meta.count, tone: meta.tone }))
-      .filter((p) => sensationToneFilter === 'all' || p.tone === sensationToneFilter)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 12);
+    const filteredItems =
+      sensationToneFilter === 'all'
+        ? rawItems
+        : rawItems.filter((it) => it.tone === sensationToneFilter);
 
-    const categories = Array.from(categoryMap.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 6);
+    // 1. Unified sensation clusters across filtered items
+    const allUnified = buildUnifiedSensationClusters(filteredItems);
 
-    const colorCorrelations = NOTE_COLOR_LIST.filter((c) => colorCorrelationMap.has(c.key)).map(
-      (col) => {
-        const entries = Array.from(colorCorrelationMap.get(col.key)!.entries())
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 3)
-          .map(([text, count]) => ({ text, count }));
-        return { meta: col, topBullets: entries };
-      }
+    // 2. Divided by Areas, with both Areas AND items ordered vertically from +2 to -2
+    const areaMap = new Map<string, UnifiedSensationCluster[]>();
+    for (const cluster of allUnified) {
+      const list = areaMap.get(cluster.area) || [];
+      list.push(cluster);
+      areaMap.set(cluster.area, list);
+    }
+
+    const areaGroups = Array.from(areaMap.entries())
+      .map(([area, clusters]) => {
+        const sortedItems = [...clusters].sort((a, b) => {
+          const scoreDiff = VALENCE_TO_SCORE[b.tone] - VALENCE_TO_SCORE[a.tone];
+          if (scoreDiff !== 0) return scoreDiff;
+          if (Math.abs(b.avgScore - a.avgScore) > 0.05) return b.avgScore - a.avgScore;
+          return b.count - a.count;
+        });
+        const totalAreaCount = sortedItems.reduce((acc, c) => acc + c.count, 0);
+        const areaScoreSum = sortedItems.reduce((acc, c) => acc + c.scoreSum, 0);
+        const areaAvgScore = totalAreaCount > 0 ? areaScoreSum / totalAreaCount : 0;
+        const maxAreaCount = Math.max(1, ...sortedItems.map((c) => c.count));
+        return {
+          area,
+          totalCount: totalAreaCount,
+          avgScore: areaAvgScore,
+          topScore: sortedItems[0]?.avgScore ?? 0,
+          maxItemCount: maxAreaCount,
+          items: sortedItems,
+        };
+      })
+      .sort((a, b) => {
+        if (Math.abs(b.avgScore - a.avgScore) > 0.05) return b.avgScore - a.avgScore;
+        return b.totalCount - a.totalCount;
+      });
+
+    // Flattened sorted list for exports
+    const flatExportPhrases = areaGroups.flatMap((g) => g.items);
+
+    // 3. Per-color frequent sensations ordered strictly +2 -> -2 vertically
+    const orderedColorMeta = [...NOTE_COLOR_LIST].sort(
+      (a, b) => b.valenceScore - a.valenceScore
     );
+    const colorCorrelations = orderedColorMeta
+      .map((col) => {
+        const colorItems = filteredItems.filter((it) => it.color === col.key);
+        if (colorItems.length === 0) return null;
+        const clustered = buildUnifiedSensationClusters(colorItems)
+          .sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count;
+            return b.avgScore - a.avgScore;
+          })
+          .slice(0, 4)
+          .map((c) => ({ text: c.fullText, count: c.count }));
+        return { meta: col, topBullets: clustered };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
 
     return {
-      totalBullets,
+      totalBullets: rawItems.length,
+      filteredTotalBullets: filteredItems.length,
       veryPositiveCount,
       positiveCount,
       middleCount,
       mildNegativeCount,
       negativeCount,
-      topPhrases,
-      categories,
+      areaGroups,
+      flatExportPhrases,
       colorCorrelations,
     };
   }, [flatEntries, sensationToneFilter]);
 
-  const donutSegments = useMemo(() => {
-    const total = flatEntries.length;
-    if (total === 0) return [];
-    const radius = 44;
-    const circumference = 2 * Math.PI * radius;
-    let cumulativeFraction = 0;
-    return usedColorStats.map((c) => {
-      const fraction = c.count / total;
-      const dashLength = fraction * circumference;
-      const offset = -cumulativeFraction * circumference;
-      cumulativeFraction += fraction;
-      return {
-        key: c.meta.key,
-        label: c.meta.label,
-        hex: c.meta.hex,
-        count: c.count,
-        pct: c.pct,
-        dashArray: `${dashLength} ${circumference}`,
-        dashOffset: offset,
+  const activeFiltersSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (activeValencePreset !== 'all') {
+      const labelMap: Record<string, string> = {
+        very_positive: '+2 Contento (Celeste)',
+        positive: '+1 Abbastanza bene (Celeste chiaro)',
+        middle: '0 Normale (Ambra)',
+        mild_negative: '-1 Male (Rosso chiaro)',
+        negative: '-2 Malissimo (Rosso/Antracita)',
       };
-    });
-  }, [usedColorStats, flatEntries.length]);
+      parts.push(`Colore: ${labelMap[activeValencePreset] || selectedColors.join(', ')}`);
+    }
+    if (dayPeriodFilter !== 'all') {
+      parts.push(`Fascia: ${DAY_PERIOD_LABELS[dayPeriodFilter].title}`);
+    }
+    if (keywordFilter.trim()) {
+      parts.push(`Parola: "${keywordFilter.trim()}"`);
+    }
+    if (sensationToneFilter !== 'all') {
+      parts.push(`Sensazioni: ${COLOR_VALENCE_META[sensationToneFilter].label}`);
+    }
+    return parts.join(' · ');
+  }, [activeValencePreset, selectedColors, dayPeriodFilter, keywordFilter, sensationToneFilter]);
 
   const buildExportPayload = (): ExportStatsPayload => {
     const dayLookup = new Map(dailyNotes.map((d) => [d.date, d.title]));
@@ -678,18 +1047,9 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       };
     });
 
-    // If user exports notes directly and filter was empty, fall back to dateRange notes
-    const notesForExport =
-      filteredNoteRows.length > 0
-        ? filteredNoteRows
-        : buildNotesExportRows(
-            dailyNotes,
-            periodFilter === 'all' ? undefined : dateRange.start,
-            periodFilter === 'all' ? undefined : dateRange.end
-          );
-
     return {
       periodLabel: dateRange.label,
+      activeFiltersSummary: activeFiltersSummary || undefined,
       totalEntries: flatEntries.length,
       activeDaysCount,
       avgValenceScore,
@@ -713,11 +1073,13 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         range: p.meta.range,
         count: p.count,
         pct: p.pct,
-        topSensations: p.topSensations.map((s) => `${s.text} (${s.count})`).join(', '),
+        topSensations: p.topAreas
+          .map((a) => `${a.area}: ${a.scoreLabel} (${a.count})`)
+          .join(', '),
       })),
-      sensationRows: sensationAnalytics.topPhrases.map((s) => ({
-        text: s.text,
-        tone: COLOR_VALENCE_META[s.tone].label,
+      sensationRows: sensationAnalytics.flatExportPhrases.map((s) => ({
+        text: s.fullText,
+        tone: `${COLOR_VALENCE_META[s.tone].scoreLabel} ${COLOR_VALENCE_META[s.tone].label}`,
         count: s.count,
       })),
       dailyTimelineRows: timelineBuckets.map((b) => ({
@@ -726,11 +1088,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         avgScore: b.avgScore,
         summary: b.topBullet || '',
       })),
-      filteredNotes: notesForExport,
+      filteredNotes: filteredNoteRows,
       chartSvgContainers: [
         { title: 'Andamento nel periodo', element: timelineChartRef.current },
-        { title: 'Distribuzione colori', element: colorsChartRef.current },
-        { title: 'Distribuzione oraria (00–23)', element: hourlyChartRef.current },
+        { title: 'Distribuzione valenza (+2 a -2)', element: colorsChartRef.current },
+        { title: 'Orari e fasce', element: hourlyChartRef.current },
       ],
     };
   };
@@ -754,6 +1116,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     selectedColors.length > 0 ||
     dayPeriodFilter !== 'all' ||
     keywordFilter.trim() !== '' ||
+    sensationToneFilter !== 'all' ||
     periodFilter === 'custom' ||
     periodFilter === 'single_day';
 
@@ -792,7 +1155,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   Esporta Grafici, Statistiche o Note
                 </h3>
                 <p className="text-[11px] text-[var(--app-text-muted)]">
-                  Scarica subito in formato Excel (.xlsx) o PDF per il periodo: {dateRange.label}
+                  Scarica in Excel (.xlsx) o PDF con i filtri attivi ({dateRange.label}
+                  {activeFiltersSummary ? ` · ${activeFiltersSummary}` : ''})
                 </p>
               </div>
             </div>
@@ -833,7 +1197,10 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     onClick={() => handleRunExport('excel', item.scope)}
                     className="flex-1 min-h-[36px] inline-flex items-center justify-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1.5 text-xs font-semibold text-[var(--app-text)] hover:border-[var(--app-accent-soft-border)] hover:bg-[var(--app-accent-soft)] disabled:opacity-50 transition-colors"
                   >
-                    <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
+                    <FileSpreadsheet
+                      className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400"
+                      aria-hidden="true"
+                    />
                     <span>Excel</span>
                   </button>
                   <button
@@ -868,14 +1235,15 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
                 {prefs.timelineChartType === 'line'
                   ? 'Scala valenza: +2 Contento · +1 Abbastanza bene · 0 Normale · -1 Male · -2 Malissimo'
-                  : 'Tocca un giorno sul grafico per aprire i dettagli'}
+                  : periodFilter === 'single_day'
+                    ? 'Tocca una fascia oraria sul grafico per vedere i dettagli'
+                    : 'Tocca un giorno sul grafico per vedere i dettagli'}
               </p>
             </div>
 
             <div className="inline-flex items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
               {(
                 [
-                  { id: 'bars', label: 'Barre colori' },
                   { id: 'line', label: 'Linea valenza' },
                   { id: 'valence', label: 'Fasce valenza' },
                 ] as const
@@ -938,10 +1306,10 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               ) : (
                 <div className="w-full overflow-x-auto">
                   <svg
-                    viewBox="0 0 600 165"
-                    className="w-full min-w-[340px] h-48"
+                    viewBox={`0 0 ${lineChartGeometry.width} ${lineChartGeometry.height}`}
+                    className="w-full min-w-[320px] h-52"
                     role="img"
-                    aria-label="Grafico a linea della valenza emotiva (+2 a -2)"
+                    aria-label="Grafico orizzontale a linea della valenza emotiva (+2 a -2)"
                   >
                     <defs>
                       <linearGradient id="moodAreaGrad" x1="0" y1="0" x2="0" y2="1">
@@ -952,31 +1320,74 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                         <stop offset="100%" stopColor="#EF4444" stopOpacity="0.16" />
                       </linearGradient>
                     </defs>
-                    {/* Reference lines for +2, +1, 0, -1, -2 */}
+
+                    {/* Reference score lines (+2, +1, 0, -1, -2) */}
                     {[
-                      { val: '+2', y: 16, col: '#0284C7' },
-                      { val: '+1', y: 48, col: '#0EA5E9' },
-                      { val: '0', y: 80, col: '#D97706' },
-                      { val: '-1', y: 112, col: '#E11D48' },
-                      { val: '-2', y: 144, col: '#DC2626' },
-                    ].map((ref) => (
-                      <g key={ref.val}>
+                      { val: '+2', s: 2, col: '#0284C7' },
+                      { val: '+1', s: 1, col: '#0EA5E9' },
+                      { val: '0', s: 0, col: '#D97706' },
+                      { val: '-1', s: -1, col: '#E11D48' },
+                      { val: '-2', s: -2, col: '#DC2626' },
+                    ].map((ref) => {
+                      const ry = lineChartGeometry.scoreToY(ref.s);
+                      return (
+                        <g key={ref.val}>
+                          <line
+                            x1={lineChartGeometry.padX}
+                            y1={ry}
+                            x2={lineChartGeometry.width - lineChartGeometry.padRight}
+                            y2={ry}
+                            stroke="var(--app-divider)"
+                            strokeDasharray="3 3"
+                          />
+                          <text
+                            x="6"
+                            y={ry + 3.5}
+                            fontSize="10"
+                            fill={ref.col}
+                            fontFamily="monospace"
+                          >
+                            {ref.val}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Horizontal baseline & X-axis labels (Hours for 1 day, Days for other periods) */}
+                    <line
+                      x1={lineChartGeometry.padX}
+                      y1={lineChartGeometry.scoreToY(-2) + 8}
+                      x2={lineChartGeometry.width - lineChartGeometry.padRight}
+                      y2={lineChartGeometry.scoreToY(-2) + 8}
+                      stroke="var(--app-divider)"
+                      strokeWidth="1"
+                    />
+                    {lineChartGeometry.xTicks.map((tick, idx) => (
+                      <g key={`${tick.label}-${idx}`}>
                         <line
-                          x1="28"
-                          y1={ref.y}
-                          x2="572"
-                          y2={ref.y}
+                          x1={tick.x}
+                          y1={lineChartGeometry.scoreToY(2)}
+                          x2={tick.x}
+                          y2={lineChartGeometry.scoreToY(-2) + 8}
                           stroke="var(--app-divider)"
-                          strokeDasharray="3 3"
+                          strokeOpacity="0.45"
+                          strokeWidth="1"
                         />
                         <text
-                          x="4"
-                          y={ref.y + 3}
+                          x={tick.x}
+                          y={lineChartGeometry.height - 6}
+                          textAnchor={
+                            idx === 0
+                              ? 'start'
+                              : idx === lineChartGeometry.xTicks.length - 1
+                                ? 'end'
+                                : 'middle'
+                          }
                           fontSize="9.5"
-                          fill={ref.col}
+                          fill="var(--app-text-subtle)"
                           fontFamily="monospace"
                         >
-                          {ref.val}
+                          {tick.label}
                         </text>
                       </g>
                     ))}
@@ -995,12 +1406,12 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       />
                     )}
                     {lineChartGeometry.points.map((pt) => {
-                      const isSelected = activeBucket?.date === pt.bucket.date;
+                      const isSelected = activeBucket?.key === pt.bucket.key;
                       return (
                         <g
-                          key={pt.bucket.date}
+                          key={pt.bucket.key}
                           className="cursor-pointer"
-                          onClick={() => setSelectedTimelineKey(pt.bucket.date)}
+                          onClick={() => setSelectedTimelineKey(pt.bucket.key)}
                         >
                           <circle
                             cx={pt.x}
@@ -1022,116 +1433,101 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             </div>
           ) : (
             <div className="mt-4">
-              {/* SVG Bar Chart for clean PDF capture + interactive click columns */}
-              <div className="flex items-end gap-1.5 overflow-x-auto pb-2 min-h-[156px]">
-                {timelineBuckets.map((bucket) => {
-                  const isSelected = activeBucket?.date === bucket.date;
-                  const heightPct = bucket.total
-                    ? Math.max(14, Math.round((bucket.total / maxTimelineTotal) * 100))
-                    : 4;
+              {activeTimelineItems.length === 0 ? (
+                <p className="py-8 text-center text-xs text-[var(--app-text-muted)]">
+                  Servono appunti nel periodo per mostrare le fasce di valenza.
+                </p>
+              ) : (
+                <div className="flex items-end gap-1.5 overflow-x-auto pb-2 min-h-[156px]">
+                  {activeTimelineItems.map((bucket) => {
+                    const isSelected = activeBucket?.key === bucket.key;
+                    const heightPct = bucket.total
+                      ? Math.max(14, Math.round((bucket.total / maxTimelineTotal) * 100))
+                      : 4;
 
-                  return (
-                    <button
-                      key={bucket.date}
-                      type="button"
-                      onClick={() => setSelectedTimelineKey(bucket.date)}
-                      aria-label={`${bucket.shortLabel}: ${bucket.total} appunti`}
-                      className={`group flex flex-col items-center justify-end gap-1.5 min-w-[26px] flex-1 h-[140px] rounded-lg px-0.5 py-1 transition-colors ${
-                        isSelected ? 'bg-[var(--app-accent-soft)]' : 'hover:bg-[var(--app-card-alt)]'
-                      }`}
-                    >
-                      <div className="w-full max-w-[22px] flex-1 flex flex-col justify-end">
-                        {bucket.total === 0 ? (
-                          <div className="w-full h-1 rounded-full bg-[var(--app-divider)]" />
-                        ) : prefs.timelineChartType === 'valence' ? (
-                          <div
-                            style={{ height: `${heightPct}%` }}
-                            className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-[var(--app-border)]"
-                          >
-                            {bucket.negCount > 0 && (
-                              <div
-                                style={{ flexGrow: bucket.negCount, backgroundColor: '#EF4444' }}
-                                title={`Malissimo (-2 · Rosso/Antracita): ${bucket.negCount}`}
-                              />
-                            )}
-                            {bucket.mildNegCount > 0 && (
-                              <div
-                                style={{
-                                  flexGrow: bucket.mildNegCount,
-                                  backgroundColor: '#FCA5A5',
-                                }}
-                                title={`Male (-1 · Rosso chiaro): ${bucket.mildNegCount}`}
-                              />
-                            )}
-                            {bucket.midCount > 0 && (
-                              <div
-                                style={{ flexGrow: bucket.midCount, backgroundColor: '#F59E0B' }}
-                                title={`Normale (0 · Ambra): ${bucket.midCount}`}
-                              />
-                            )}
-                            {bucket.posCount > 0 && (
-                              <div
-                                style={{ flexGrow: bucket.posCount, backgroundColor: '#7DD3FC' }}
-                                title={`Abbastanza bene (+1 · Celeste chiaro): ${bucket.posCount}`}
-                              />
-                            )}
-                            {bucket.veryPosCount > 0 && (
-                              <div
-                                style={{ flexGrow: bucket.veryPosCount, backgroundColor: '#0EA5E9' }}
-                                title={`Contento (+2 · Celeste): ${bucket.veryPosCount}`}
-                              />
-                            )}
-                          </div>
-                        ) : (
-                          <div
-                            style={{ height: `${heightPct}%` }}
-                            className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-[var(--app-border)]"
-                          >
-                            {bucket.colorSegments.map((seg) => (
-                              <div
-                                key={seg.color}
-                                style={{
-                                  flexGrow: seg.count,
-                                  backgroundColor: seg.hex,
-                                }}
-                                title={`${seg.label}: ${seg.count}`}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <span
-                        className={`font-mono text-[10px] tabular-nums ${
-                          isSelected ? 'font-bold text-[var(--app-text)]' : 'text-[var(--app-text-subtle)]'
+                    return (
+                      <button
+                        key={bucket.key}
+                        type="button"
+                        onClick={() => setSelectedTimelineKey(bucket.key)}
+                        aria-label={`${bucket.shortLabel}: ${bucket.total} appunti`}
+                        className={`group flex flex-col items-center justify-end gap-1.5 min-w-[30px] flex-1 h-[140px] rounded-lg px-0.5 py-1 transition-colors ${
+                          isSelected ? 'bg-[var(--app-accent-soft)]' : 'hover:bg-[var(--app-card-alt)]'
                         }`}
                       >
-                        {bucket.dayNum}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                        <div className="w-full max-w-[24px] flex-1 flex flex-col justify-end">
+                          {bucket.total === 0 ? (
+                            <div className="w-full h-1 rounded-full bg-[var(--app-divider)]" />
+                          ) : (
+                            <div
+                              style={{ height: `${heightPct}%` }}
+                              className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-[var(--app-border)]"
+                            >
+                              {bucket.negCount > 0 && (
+                                <div
+                                  style={{ flexGrow: bucket.negCount, backgroundColor: '#EF4444' }}
+                                  title={`Malissimo (-2 · Rosso/Antracita): ${bucket.negCount}`}
+                                />
+                              )}
+                              {bucket.mildNegCount > 0 && (
+                                <div
+                                  style={{
+                                    flexGrow: bucket.mildNegCount,
+                                    backgroundColor: '#FCA5A5',
+                                  }}
+                                  title={`Male (-1 · Rosso chiaro): ${bucket.mildNegCount}`}
+                                />
+                              )}
+                              {bucket.midCount > 0 && (
+                                <div
+                                  style={{ flexGrow: bucket.midCount, backgroundColor: '#F59E0B' }}
+                                  title={`Normale (0 · Ambra): ${bucket.midCount}`}
+                                />
+                              )}
+                              {bucket.posCount > 0 && (
+                                <div
+                                  style={{ flexGrow: bucket.posCount, backgroundColor: '#7DD3FC' }}
+                                  title={`Abbastanza bene (+1 · Celeste chiaro): ${bucket.posCount}`}
+                                />
+                              )}
+                              {bucket.veryPosCount > 0 && (
+                                <div
+                                  style={{ flexGrow: bucket.veryPosCount, backgroundColor: '#0EA5E9' }}
+                                  title={`Contento (+2 · Celeste): ${bucket.veryPosCount}`}
+                                />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <span
+                          className={`font-mono text-[9.5px] tabular-nums ${
+                            isSelected ? 'font-bold text-[var(--app-text)]' : 'text-[var(--app-text-subtle)]'
+                          }`}
+                        >
+                          {bucket.axisLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
-              {/* Hidden/Compact SVG snapshot for PDF when bars mode is active */}
-              {timelineBuckets.length > 0 && (
-                <svg
-                  viewBox="0 0 600 100"
-                  className="sr-only"
-                  aria-hidden="true"
-                >
-                  {timelineBuckets.slice(0, 31).map((b, i, arr) => {
+              {/* Compact SVG snapshot for PDF export when Fasce valenza is active */}
+              {activeTimelineItems.length > 0 && (
+                <svg viewBox="0 0 600 100" className="sr-only" aria-hidden="true">
+                  {activeTimelineItems.slice(0, 31).map((b, i, arr) => {
                     const slotW = 560 / Math.max(1, arr.length);
                     const barH = b.total ? Math.max(8, (b.total / maxTimelineTotal) * 76) : 2;
-                    const dominant = b.colorSegments[0]?.hex || '#E7E5E4';
+                    const fillHex = b.avgScore !== null ? scoreToHex(b.avgScore) : '#E7E5E4';
                     return (
                       <rect
-                        key={b.date}
+                        key={b.key}
                         x={20 + i * slotW}
                         y={88 - barH}
                         width={Math.max(4, slotW - 3)}
                         height={barH}
                         rx="2"
-                        fill={b.total > 0 ? dominant : '#E7E5E4'}
+                        fill={b.total > 0 ? fillHex : '#E7E5E4'}
                       />
                     );
                   })}
@@ -1142,9 +1538,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
 
           {activeBucket?.topBullet && (
             <p className="mt-2 border-t border-[var(--app-divider)] pt-2.5 text-xs text-[var(--app-text-muted)]">
-              Nota chiave del{' '}
-              <span className="font-semibold text-[var(--app-text)]">{activeBucket.shortLabel}</span>:{' '}
-              {activeBucket.topBullet}
+              Nota chiave ({activeBucket.shortLabel}): {activeBucket.topBullet}
             </p>
           )}
         </section>
@@ -1157,153 +1551,76 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           ref={colorsChartRef}
           className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs"
         >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Palette className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
-              <h3 className="text-sm font-bold text-[var(--app-text)]">
-                Colori &amp; Valenza emotiva (+2 a -2)
-              </h3>
-            </div>
-
-            <div className="inline-flex items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
-              <button
-                type="button"
-                onClick={() => updatePref('colorChartType', 'donut')}
-                className={`min-h-[28px] rounded-lg px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
-                  prefs.colorChartType === 'donut'
-                    ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
-                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
-                }`}
-              >
-                6 Colori
-              </button>
-              <button
-                type="button"
-                onClick={() => updatePref('colorChartType', 'valence')}
-                className={`min-h-[28px] rounded-lg px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
-                  prefs.colorChartType === 'valence'
-                    ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
-                    : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
-                }`}
-              >
-                Punteggi (+2 / +1 / 0 / -1 / -2)
-              </button>
-            </div>
+          <div className="flex items-center gap-2">
+            <Palette className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
+            <h3 className="text-sm font-bold text-[var(--app-text)]">
+              Colori &amp; Valenza emotiva (+2 a -2)
+            </h3>
           </div>
 
-          {prefs.colorChartType === 'donut' ? (
-            <div className="mt-4 flex flex-col sm:flex-row items-center gap-5">
-              {/* Donut SVG */}
-              <div className="relative h-36 w-36 shrink-0">
-                <svg
-                  viewBox="0 0 112 112"
-                  className="h-full w-full -rotate-90"
-                  aria-hidden="true"
-                >
-                  <circle
-                    cx="56"
-                    cy="56"
-                    r="44"
-                    fill="none"
-                    stroke="var(--app-divider)"
-                    strokeWidth="14"
+          <div className="mt-4 space-y-4">
+            <div className="h-4 w-full rounded-full overflow-hidden bg-[var(--app-divider)] flex">
+              {colorValenceStats.map((item) =>
+                item.count > 0 ? (
+                  <div
+                    key={item.valence}
+                    style={{
+                      width: `${(item.count / (flatEntries.length || 1)) * 100}%`,
+                      backgroundColor: item.meta.hex,
+                    }}
+                    title={`${item.meta.label} (${item.meta.scoreLabel}): ${item.count} (${item.pct}%)`}
                   />
-                  {donutSegments.map((seg) => (
-                    <circle
-                      key={seg.key}
-                      cx="56"
-                      cy="56"
-                      r="44"
-                      fill="none"
-                      stroke={seg.hex}
-                      strokeWidth="14"
-                      strokeDasharray={seg.dashArray}
-                      strokeDashoffset={seg.dashOffset}
-                    />
-                  ))}
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                  <span className="font-mono text-lg font-bold text-[var(--app-text)] tabular-nums">
-                    {flatEntries.length}
-                  </span>
-                  <span className="text-[10px] text-[var(--app-text-muted)]">appunti</span>
-                </div>
-              </div>
-
-              <div className="w-full space-y-2.5">
-                {usedColorStats.map(({ meta, count, pct }) => (
-                  <div key={meta.key} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-2 font-medium text-[var(--app-text)]">
-                        <span
-                          className={`h-2.5 w-2.5 rounded-full border shrink-0 ${meta.swatchClass}`}
-                          aria-hidden="true"
-                        />
-                        <span>{meta.label}</span>
-                        <span className="text-[11px] font-normal text-[var(--app-text-subtle)]">
-                          · {meta.valenceLabel}
-                        </span>
-                      </span>
-                      <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
-                        {count} ({pct}%)
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${pct}%`,
-                          backgroundColor: meta.hex,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                ) : null
+              )}
             </div>
-          ) : (
-            <div className="mt-4 space-y-4">
-              <div className="h-4 w-full rounded-full overflow-hidden bg-[var(--app-divider)] flex">
-                {colorValenceStats.map((item) =>
-                  item.count > 0 ? (
+
+            <div className="space-y-3">
+              {colorValenceStats.map((item) => (
+                <div key={item.valence} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-[var(--app-text)]">
+                      {item.meta.scoreLabel} · {item.meta.label}{' '}
+                      <span className="font-normal text-[var(--app-text-subtle)]">
+                        ({item.meta.subtitle})
+                      </span>
+                    </span>
+                    <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
+                      {item.count} ({item.pct}%)
+                    </span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
                     <div
-                      key={item.valence}
+                      className="h-full rounded-full transition-all"
                       style={{
-                        width: `${(item.count / (flatEntries.length || 1)) * 100}%`,
+                        width: `${item.pct}%`,
                         backgroundColor: item.meta.hex,
                       }}
-                      title={`${item.meta.label} (${item.meta.scoreLabel}): ${item.count} (${item.pct}%)`}
                     />
-                  ) : null
-                )}
-              </div>
-
-              <div className="space-y-3">
-                {colorValenceStats.map((item) => (
-                  <div key={item.valence} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-[var(--app-text)]">
-                        {item.meta.scoreLabel} · {item.meta.label}{' '}
-                        <span className="font-normal text-[var(--app-text-subtle)]">({item.meta.subtitle})</span>
-                      </span>
-                      <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
-                        {item.count} ({item.pct}%)
-                      </span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{
-                          width: `${item.pct}%`,
-                          backgroundColor: item.meta.hex,
-                        }}
-                      />
-                    </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-          )}
+
+            {flatEntries.length > 0 && (
+              <svg viewBox="0 0 600 96" className="sr-only" aria-hidden="true">
+                {colorValenceStats.map((item, idx) => {
+                  const y = 6 + idx * 18;
+                  const barW = Math.max(4, Math.round((item.pct / 100) * 440));
+                  return (
+                    <g key={item.valence}>
+                      <text x="4" y={y + 11} fontSize="10" fill="#44403C" fontFamily="sans-serif">
+                        {item.meta.scoreLabel} {item.meta.label}
+                      </text>
+                      <rect x="130" y={y + 2} width={barW} height="11" rx="3" fill={item.meta.hex} />
+                      <text x={136 + barW} y={y + 11} fontSize="9.5" fill="#57534E" fontFamily="monospace">
+                        {item.count} ({item.pct}%)
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            )}
+          </div>
         </section>
       ),
     },
@@ -1317,9 +1634,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
-              <h3 className="text-sm font-bold text-[var(--app-text)]">
-                Orari &amp; Fasce (Pomeriggio 13:30–18:30)
-              </h3>
+              <h3 className="text-sm font-bold text-[var(--app-text)]">Orari &amp; Fasce</h3>
             </div>
 
             <div className="inline-flex items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
@@ -1462,10 +1777,29 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   </div>
                 );
               })}
+              {flatEntries.length > 0 && (
+                <svg viewBox="0 0 600 84" className="sr-only" aria-hidden="true">
+                  {dayPeriodStats.map((dp, idx) => {
+                    const y = 6 + idx * 19;
+                    const barW = Math.max(4, Math.round((dp.pct / 100) * 430));
+                    return (
+                      <g key={dp.period}>
+                        <text x="4" y={y + 11} fontSize="10" fill="#44403C" fontFamily="sans-serif">
+                          {dp.meta.title}
+                        </text>
+                        <rect x="110" y={y + 2} width={barW} height="11" rx="3" fill="#0EA5E9" />
+                        <text x={116 + barW} y={y + 11} fontSize="9.5" fill="#57534E" fontFamily="monospace">
+                          {dp.count} ({dp.pct}%)
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
             </div>
           )}
 
-          {/* Clickable 4 Time-of-Day Windows */}
+          {/* Clickable 4 Time-of-Day Windows with inline short score-colored area bars */}
           <div className="mt-4 divide-y divide-[var(--app-divider)]">
             {dayPeriodStats.map((dp) => (
               <div key={dp.period} className="py-2.5 first:pt-0 last:pb-0">
@@ -1491,10 +1825,23 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     {dp.count} ({dp.pct}%)
                   </span>
                 </div>
-                {dp.topSensations.length > 0 && (
-                  <p className="mt-1 text-[11px] text-[var(--app-text-muted)] leading-relaxed">
-                    {dp.topSensations.map((s) => `${s.text} (${s.count})`).join(' · ')}
-                  </p>
+                {dp.topAreas.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--app-text-muted)]">
+                    {dp.topAreas.map((a) => (
+                      <span
+                        key={a.area}
+                        className="inline-flex items-center gap-1.5"
+                        title={`${a.area}: media ${a.avgScore.toFixed(1)} (${a.count}×)`}
+                      >
+                        <span className="font-medium text-[var(--app-text)]">{a.area}:</span>
+                        <span
+                          className="inline-block h-2 w-7 rounded-full shrink-0"
+                          style={{ backgroundColor: a.colorHex }}
+                          aria-label={`punteggio ${a.scoreLabel}`}
+                        />
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             ))}
@@ -1505,26 +1852,26 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     {
       id: 'stats_sensations',
       render: () => (
-        <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs space-y-3.5">
+          <div className="space-y-2.5">
             <div className="flex items-center gap-2">
-              <Smile className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
-              <div>
-                <h3 className="text-sm font-bold text-[var(--app-text)]">
-                  Sensazioni, stati d’animo e correlazione colori
-                </h3>
-                <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
-                  +2 Celeste · +1 Celeste chiaro · 0 Ambra · -1 Rosso chiaro · -2 Rosso / Antracita
-                </p>
-              </div>
+              <Smile className="h-4 w-4 text-[var(--app-accent-text)] shrink-0" aria-hidden="true" />
+              <h3 className="text-sm font-bold text-[var(--app-text)]">
+                Sensazioni, stati d’animo e colori
+              </h3>
             </div>
 
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1">
+            {/* Full-width horizontal tone filters */}
+            <div
+              role="group"
+              aria-label="Filtra sensazioni per valenza"
+              className="w-full grid grid-cols-3 sm:grid-cols-6 gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1"
+            >
               {(
                 [
                   { id: 'all', label: 'Tutte' },
                   { id: 'very_positive', label: '+2 Contento' },
-                  { id: 'positive', label: '+1 Abbastanza bene' },
+                  { id: 'positive', label: '+1 Abb. bene' },
                   { id: 'middle', label: '0 Normale' },
                   { id: 'mild_negative', label: '-1 Male' },
                   { id: 'negative', label: '-2 Malissimo' },
@@ -1534,7 +1881,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   key={t.id}
                   type="button"
                   onClick={() => setSensationToneFilter(t.id)}
-                  className={`min-h-[28px] rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                  className={`min-h-[28px] rounded-lg px-1.5 py-1 text-[10.5px] sm:text-[11px] font-semibold leading-tight text-center transition-colors ${
                     sensationToneFilter === t.id
                       ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
                       : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
@@ -1546,13 +1893,12 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             </div>
           </div>
 
-          {sensationAnalytics.totalBullets === 0 ? (
-            <p className="mt-4 text-xs text-[var(--app-text-muted)]">
-              Ancora nessuna sintesi di sensazioni presente negli appunti filtrati. Registra una
-              nuova nota vocale per estrarle automaticamente.
+          {sensationAnalytics.filteredTotalBullets === 0 ? (
+            <p className="mt-2 text-xs text-[var(--app-text-muted)]">
+              Nessuna sensazione presente per i filtri selezionati.
             </p>
           ) : (
-            <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               <div className="lg:col-span-5 space-y-4">
                 <div>
                   <p className="text-xs font-medium text-[var(--app-text-muted)] mb-2">
@@ -1629,33 +1975,14 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="border-t border-[var(--app-divider)] pt-3">
-                  <p className="text-xs font-medium text-[var(--app-text-muted)] mb-2">Aree più annotate</p>
-                  <div className="space-y-1.5">
-                    {sensationAnalytics.categories.map((cat) => {
-                      const pct = Math.round(
-                        (cat.count / sensationAnalytics.totalBullets) * 100
-                      );
-                      return (
-                        <div key={cat.name} className="flex items-center justify-between text-xs">
-                          <span className="font-medium text-[var(--app-text)]">{cat.name}</span>
-                          <span className="font-mono text-[var(--app-text-muted)] tabular-nums">
-                            {cat.count} ({pct}%)
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
                 {sensationAnalytics.colorCorrelations.length > 0 && (
                   <div className="border-t border-[var(--app-divider)] pt-3">
                     <p className="text-xs font-medium text-[var(--app-text-muted)] mb-2">
-                      Sensazioni frequenti per colore
+                      Sensazioni frequenti per colore (+2 a -2)
                     </p>
                     <div className="space-y-2">
                       {sensationAnalytics.colorCorrelations.map(({ meta, topBullets }) => (
-                        <div key={meta.key} className="text-xs">
+                        <div key={meta.key} className="text-xs leading-relaxed">
                           <span className="inline-flex items-center gap-1.5 font-semibold text-[var(--app-text)]">
                             <span
                               className={`h-2 w-2 rounded-full border shrink-0 ${meta.swatchClass}`}
@@ -1673,48 +2000,70 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 )}
               </div>
 
-              <div className="lg:col-span-7 space-y-2.5">
+              {/* Frequent sensations divided by Area, unified similar descriptions, sorted +2 -> -2 vertically */}
+              <div className="lg:col-span-7 space-y-4">
                 <p className="text-xs font-medium text-[var(--app-text-muted)]">
-                  Sensazioni e stati più frequenti
+                  Sensazioni e stati più frequenti (divisi per aree, da +2 a -2)
                 </p>
-                {sensationAnalytics.topPhrases.length === 0 ? (
+                {sensationAnalytics.areaGroups.length === 0 ? (
                   <p className="text-xs text-[var(--app-text-subtle)] py-4">
                     Nessuna sensazione in questa categoria.
                   </p>
                 ) : (
-                  sensationAnalytics.topPhrases.map((phrase) => {
-                    const maxCount = sensationAnalytics.topPhrases[0]?.count || 1;
-                    const widthPct = Math.max(12, Math.round((phrase.count / maxCount) * 100));
-                    const barColor =
-                      phrase.tone === 'very_positive'
-                        ? 'bg-sky-500'
-                        : phrase.tone === 'positive'
-                          ? 'bg-sky-300'
-                          : phrase.tone === 'middle'
-                            ? 'bg-amber-400'
-                            : phrase.tone === 'mild_negative'
-                              ? 'bg-rose-300'
-                              : 'bg-red-500';
-
-                    return (
-                      <div key={phrase.text} className="space-y-1">
-                        <div className="flex items-center justify-between gap-2 text-xs">
-                          <span className="text-[var(--app-text)] font-medium truncate">
-                            {phrase.text}
-                          </span>
-                          <span className="font-mono text-[var(--app-text-muted)] tabular-nums shrink-0">
-                            {phrase.count}×
+                  <div className="space-y-4">
+                    {sensationAnalytics.areaGroups.map((group) => (
+                      <div
+                        key={group.area}
+                        className="border-t border-[var(--app-divider)] pt-2.5 first:border-t-0 first:pt-0 space-y-2"
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-[var(--app-text)]">{group.area}</span>
+                          <span className="font-mono text-[11px] text-[var(--app-text-subtle)] tabular-nums">
+                            {group.totalCount}×
                           </span>
                         </div>
-                        <div className="h-2 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${barColor}`}
-                            style={{ width: `${widthPct}%` }}
-                          />
+
+                        <div className="space-y-2">
+                          {group.items.map((phrase) => {
+                            const widthPct = Math.max(
+                              14,
+                              Math.round((phrase.count / group.maxItemCount) * 100)
+                            );
+                            const barColor =
+                              phrase.tone === 'very_positive'
+                                ? 'bg-sky-500'
+                                : phrase.tone === 'positive'
+                                  ? 'bg-sky-300'
+                                  : phrase.tone === 'middle'
+                                    ? 'bg-amber-400'
+                                    : phrase.tone === 'mild_negative'
+                                      ? 'bg-rose-300'
+                                      : 'bg-red-500';
+                            const scoreLabel = COLOR_VALENCE_META[phrase.tone].scoreLabel;
+
+                            return (
+                              <div key={`${group.area}-${phrase.displayText}`} className="space-y-1">
+                                <div className="flex items-start justify-between gap-2 text-xs">
+                                  <span className="text-[var(--app-text)] font-medium leading-snug break-words">
+                                    {phrase.displayText}
+                                  </span>
+                                  <span className="font-mono text-[11px] text-[var(--app-text-muted)] tabular-nums shrink-0">
+                                    {scoreLabel} · {phrase.count}×
+                                  </span>
+                                </div>
+                                <div className="h-2 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${barColor}`}
+                                    style={{ width: `${widthPct}%` }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    );
-                  })
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -1726,82 +2075,272 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Header + Filters + Summary Strip */}
-      <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
+      {/* Header + Compact Proportional Filters + Summary Strip */}
+      <section className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3.5 sm:p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
             <CatIllustration
               src={statsNeko.src}
               alt={statsNeko.alt}
-              className="h-16 w-16 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
+              className="h-12 w-12 sm:h-14 sm:w-14 rounded-2xl object-cover border-2 border-[var(--app-border)] bg-[var(--app-companion-bg)] shrink-0"
             />
             <div>
-              <h2 className="flex items-center gap-2 text-base sm:text-lg font-bold text-[var(--app-text)]">
+              <h2 className="flex items-center gap-1.5 text-sm sm:text-lg font-bold text-[var(--app-text)]">
                 <BarChart3 className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
                 Statistiche &amp; Grafici
               </h2>
-              <p className="text-xs text-[var(--app-text-muted)] mt-0.5">
+              <p className="text-[11px] sm:text-xs text-[var(--app-text-muted)] mt-0.5">
                 +2 Contento · +1 Abbastanza bene · 0 Normale · -1 Male · -2 Malissimo
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 ml-auto">
             {hasCustomFilters && (
               <button
                 type="button"
                 onClick={resetAllFilters}
-                className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border)] bg-[var(--app-card)] px-3 py-1.5 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] whitespace-nowrap shrink-0"
+                className="min-h-[32px] inline-flex items-center gap-1 rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] whitespace-nowrap shrink-0"
               >
-                <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                <RotateCcw className="h-3 w-3" aria-hidden="true" />
                 Ripristina filtri
               </button>
             )}
           </div>
         </div>
 
-        {/* Period Selector (including Single Day filter!) + Search */}
-        <div className="mt-4 flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div
-              role="tablist"
-              aria-label="Periodo statistiche"
-              className="flex flex-wrap items-center gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1"
+        {/* Compact Full-Width Filters */}
+        <div className="mt-3.5 flex flex-col gap-2">
+          {/* 6 Temporal Filters spanning full horizontal width */}
+          <div
+            role="tablist"
+            aria-label="Periodo statistiche"
+            className="w-full grid grid-cols-3 sm:grid-cols-6 gap-1 rounded-xl bg-[var(--app-accent-soft)] border border-[var(--app-accent-soft-border)] p-1"
+          >
+            {(
+              [
+                { id: 'single_day', label: 'Giorno singolo' },
+                { id: '7d', label: '7 giorni' },
+                { id: '30d', label: '30 giorni' },
+                { id: 'month', label: 'Questo mese' },
+                { id: 'all', label: 'Tutto' },
+                { id: 'custom', label: 'Intervallo' },
+              ] as const
+            ).map((tab) => {
+              const active = periodFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => {
+                    setPeriodFilter(tab.id);
+                    setSelectedTimelineKey(null);
+                  }}
+                  className={`min-h-[30px] rounded-lg px-1.5 py-1 text-[10.5px] sm:text-[11px] font-semibold leading-tight text-center transition-colors ${
+                    active
+                      ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
+                      : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {periodFilter === 'single_day' && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)] p-2 text-xs">
+              <label className="flex items-center gap-2 text-[var(--app-text)]">
+                <span className="text-[11px] font-semibold">Seleziona giornata:</span>
+                <input
+                  type="date"
+                  value={singleDayDate}
+                  onChange={(e) => setSingleDayDate(e.target.value || todayISO)}
+                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2 py-1 font-mono text-[11px] text-[var(--app-text)] tabular-nums"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setSingleDayDate(todayISO)}
+                className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 text-[11px] font-medium text-[var(--app-text)] hover:bg-[var(--app-card-alt)]"
+              >
+                Oggi
+              </button>
+            </div>
+          )}
+
+          {periodFilter === 'custom' && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-xs">
+              <label className="flex items-center gap-1.5 text-[var(--app-text-muted)]">
+                <span className="text-[11px] font-medium">Dal:</span>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2 py-1 font-mono text-[11px] text-[var(--app-text)] tabular-nums"
+                />
+              </label>
+              <label className="flex items-center gap-1.5 text-[var(--app-text-muted)]">
+                <span className="text-[11px] font-medium">Al:</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2 py-1 font-mono text-[11px] text-[var(--app-text)] tabular-nums"
+                />
+              </label>
+            </div>
+          )}
+
+          {/* Descriptive Valence/Color Filters side-by-side (dot placed at start inside parenthesis) */}
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              aria-pressed={activeValencePreset === 'all'}
+              onClick={() => applyValencePreset('all')}
+              className={`min-h-[28px] rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
+                activeValencePreset === 'all'
+                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
+              }`}
             >
-              {(
-                [
-                  { id: 'single_day', label: 'Giorno singolo' },
-                  { id: '7d', label: '7 giorni' },
-                  { id: '30d', label: '30 giorni' },
-                  { id: 'month', label: 'Questo mese' },
-                  { id: 'all', label: 'Tutto' },
-                  { id: 'custom', label: 'Intervallo' },
-                ] as const
-              ).map((tab) => {
-                const active = periodFilter === tab.id;
+              Tutti i colori
+            </button>
+
+            <button
+              type="button"
+              aria-pressed={activeValencePreset === 'very_positive'}
+              onClick={() => applyValencePreset('very_positive')}
+              className={`min-h-[28px] inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
+                activeValencePreset === 'very_positive'
+                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
+              }`}
+            >
+              <span>+2 Contento (</span>
+              <span
+                className="h-2 w-2 rounded-full bg-sky-500 border border-sky-600 shrink-0 -mx-0.5"
+                aria-hidden="true"
+              />
+              <span>Celeste)</span>
+            </button>
+
+            <button
+              type="button"
+              aria-pressed={activeValencePreset === 'positive'}
+              onClick={() => applyValencePreset('positive')}
+              className={`min-h-[28px] inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
+                activeValencePreset === 'positive'
+                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
+              }`}
+            >
+              <span>+1 Abbastanza bene (</span>
+              <span
+                className="h-2 w-2 rounded-full bg-sky-300 border border-sky-400 shrink-0 -mx-0.5"
+                aria-hidden="true"
+              />
+              <span>Celeste chiaro)</span>
+            </button>
+
+            <button
+              type="button"
+              aria-pressed={activeValencePreset === 'middle'}
+              onClick={() => applyValencePreset('middle')}
+              className={`min-h-[28px] inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
+                activeValencePreset === 'middle'
+                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
+              }`}
+            >
+              <span>0 Normale (</span>
+              <span
+                className="h-2 w-2 rounded-full bg-amber-400 border border-amber-500 shrink-0 -mx-0.5"
+                aria-hidden="true"
+              />
+              <span>Ambra)</span>
+            </button>
+
+            <button
+              type="button"
+              aria-pressed={activeValencePreset === 'mild_negative'}
+              onClick={() => applyValencePreset('mild_negative')}
+              className={`min-h-[28px] inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
+                activeValencePreset === 'mild_negative'
+                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
+              }`}
+            >
+              <span>-1 Male (</span>
+              <span
+                className="h-2 w-2 rounded-full bg-rose-300 border border-rose-400 shrink-0 -mx-0.5"
+                aria-hidden="true"
+              />
+              <span>Rosso chiaro)</span>
+            </button>
+
+            <button
+              type="button"
+              aria-pressed={activeValencePreset === 'negative'}
+              onClick={() => applyValencePreset('negative')}
+              className={`min-h-[28px] inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
+                activeValencePreset === 'negative'
+                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
+              }`}
+            >
+              <span>-2 Malissimo (</span>
+              <span
+                className="h-2 w-2 rounded-full bg-red-500 border border-red-600 shrink-0 -mx-0.5"
+                aria-hidden="true"
+              />
+              <span>Rosso/</span>
+              <span
+                className="h-2 w-2 rounded-full bg-zinc-800 border border-zinc-950 shrink-0 -mx-0.5"
+                aria-hidden="true"
+              />
+              <span>Antracita)</span>
+            </button>
+          </div>
+
+          {/* Time-of-day filter strip + compact search side-by-side/wrapped */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setDayPeriodFilter('all')}
+                aria-pressed={dayPeriodFilter === 'all'}
+                className={`min-h-[28px] rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
+                  dayPeriodFilter === 'all'
+                    ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                    : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
+                }`}
+              >
+                Tutte le fasce orarie
+              </button>
+              {(['mattina', 'pomeriggio', 'sera', 'notte'] as const).map((dp) => {
+                const active = dayPeriodFilter === dp;
                 return (
                   <button
-                    key={tab.id}
+                    key={dp}
                     type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => {
-                      setPeriodFilter(tab.id);
-                      setSelectedTimelineKey(null);
-                    }}
-                    className={`min-h-[34px] rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    onClick={() => setDayPeriodFilter(dp)}
+                    aria-pressed={active}
+                    className={`min-h-[28px] rounded-lg border px-2 py-0.5 text-[10.5px] sm:text-[11px] font-medium transition-colors ${
                       active
-                        ? 'bg-[var(--app-btn-bg)] text-[var(--app-btn-text)] shadow-xs'
-                        : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
+                        ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
+                        : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
                     }`}
                   >
-                    {tab.label}
+                    {DAY_PERIOD_LABELS[dp].title} ({DAY_PERIOD_LABELS[dp].shortRange})
                   </button>
                 );
               })}
             </div>
 
-            <div className="relative w-full sm:w-56">
+            <div className="relative w-full sm:w-52">
               <Search
                 className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--app-text-subtle)]"
                 aria-hidden="true"
@@ -1812,7 +2351,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 onChange={(e) => setKeywordFilter(e.target.value)}
                 placeholder="Filtra per parola o stato..."
                 aria-label="Filtra statistiche per parola"
-                className="w-full min-h-[38px] rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] pl-8 pr-7 py-1 text-xs text-[var(--app-text)] placeholder:text-[var(--app-text-subtle)] focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
+                className="w-full min-h-[32px] rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] pl-8 pr-7 py-1 text-[11px] text-[var(--app-text)] placeholder:text-[var(--app-text-subtle)] focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
               />
               {keywordFilter && (
                 <button
@@ -1826,162 +2365,27 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               )}
             </div>
           </div>
-
-          {periodFilter === 'single_day' && (
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--app-accent-soft-border)] bg-[var(--app-accent-soft)] p-2.5 text-xs">
-              <label className="flex items-center gap-2 text-[var(--app-text)]">
-                <span className="font-semibold">Seleziona giornata:</span>
-                <input
-                  type="date"
-                  value={singleDayDate}
-                  onChange={(e) => setSingleDayDate(e.target.value || todayISO)}
-                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1.5 font-mono text-xs text-[var(--app-text)] tabular-nums"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => setSingleDayDate(todayISO)}
-                className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 text-xs font-medium text-[var(--app-text)] hover:bg-[var(--app-card-alt)]"
-              >
-                Oggi
-              </button>
-            </div>
-          )}
-
-          {periodFilter === 'custom' && (
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-2.5 text-xs">
-              <label className="flex items-center gap-2 text-[var(--app-text-muted)]">
-                <span className="font-medium">Dal:</span>
-                <input
-                  type="date"
-                  value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 font-mono text-xs text-[var(--app-text)] tabular-nums"
-                />
-              </label>
-              <label className="flex items-center gap-2 text-[var(--app-text-muted)]">
-                <span className="font-medium">Al:</span>
-                <input
-                  type="date"
-                  value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="rounded-lg border border-[var(--app-border)] bg-[var(--app-card)] px-2.5 py-1 font-mono text-xs text-[var(--app-text)] tabular-nums"
-                />
-              </label>
-            </div>
-          )}
-
-          {/* Valence Presets + 6 Color Toggles */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {(
-              [
-                { id: 'all', label: 'Tutti i colori' },
-                { id: 'very_positive', label: '+2 Contento (Celeste)' },
-                { id: 'positive', label: '+1 Abbastanza bene (Celeste chiaro)' },
-                { id: 'middle', label: '0 Normale (Ambra)' },
-                { id: 'mild_negative', label: '-1 Male (Rosso chiaro)' },
-                { id: 'negative', label: '-2 Malissimo (Rosso/Antracita)' },
-              ] as const
-            ).map((preset) => {
-              const active = activeValencePreset === preset.id;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => applyValencePreset(preset.id)}
-                  className={`min-h-[32px] rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                    active
-                      ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
-                      : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              );
-            })}
-
-            <span aria-hidden="true" className="mx-1 text-[var(--app-text-subtle)]">
-              |
-            </span>
-
-            {NOTE_COLOR_LIST.map((col) => {
-              const selected = selectedColors.includes(col.key);
-              return (
-                <button
-                  key={col.key}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => toggleSingleColor(col.key)}
-                  title={`Includi o escludi ${col.label} (${col.valenceLabel})`}
-                  className={`min-h-[32px] inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                    selected
-                      ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
-                      : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
-                  }`}
-                >
-                  <span
-                    className={`h-2.5 w-2.5 rounded-full border shrink-0 ${col.swatchClass}`}
-                    aria-hidden="true"
-                  />
-                  <span>{col.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Time-of-day filter strip (Pomeriggio 13:30–18:30, Sera 18:31–23:59) */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-            <button
-              type="button"
-              onClick={() => setDayPeriodFilter('all')}
-              aria-pressed={dayPeriodFilter === 'all'}
-              className={`min-h-[32px] rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                dayPeriodFilter === 'all'
-                  ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
-                  : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
-              }`}
-            >
-              Tutte le fasce orarie
-            </button>
-            {(['mattina', 'pomeriggio', 'sera', 'notte'] as const).map((dp) => {
-              const active = dayPeriodFilter === dp;
-              return (
-                <button
-                  key={dp}
-                  type="button"
-                  onClick={() => setDayPeriodFilter(dp)}
-                  aria-pressed={active}
-                  className={`min-h-[32px] rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                    active
-                      ? 'border-[var(--app-btn-bg)] bg-[var(--app-btn-bg)] text-[var(--app-btn-text)]'
-                      : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)]'
-                  }`}
-                >
-                  {DAY_PERIOD_LABELS[dp].title} ({DAY_PERIOD_LABELS[dp].shortRange})
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         {/* Summary Metrics Strip */}
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--app-divider)] border-t border-[var(--app-divider)] pt-4">
-          <div className="py-2 sm:py-0 sm:pr-4">
+        <div className="mt-3.5 grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-[var(--app-divider)] border-t border-[var(--app-divider)] pt-3.5">
+          <div className="py-1.5 sm:py-0 sm:pr-4">
             <span className="block text-[11px] text-[var(--app-text-muted)]">Appunti analizzati</span>
-            <span className="mt-0.5 block font-mono text-xl font-bold text-[var(--app-text)] tabular-nums">
+            <span className="mt-0.5 block font-mono text-lg sm:text-xl font-bold text-[var(--app-text)] tabular-nums">
               {flatEntries.length}
             </span>
           </div>
-          <div className="py-2 sm:py-0 sm:px-4">
+          <div className="py-1.5 sm:py-0 sm:px-4">
             <span className="block text-[11px] text-[var(--app-text-muted)]">Giorni con note</span>
-            <span className="mt-0.5 block font-mono text-xl font-bold text-[var(--app-text)] tabular-nums">
+            <span className="mt-0.5 block font-mono text-lg sm:text-xl font-bold text-[var(--app-text)] tabular-nums">
               {activeDaysCount}
             </span>
           </div>
-          <div className="py-2 sm:py-0 sm:px-4">
-            <span className="block text-[11px] text-[var(--app-text-muted)]">Media valenza (-2 a +2)</span>
-            <span className="mt-0.5 block font-mono text-sm font-semibold text-[var(--app-text)] tabular-nums">
+          <div className="py-1.5 sm:py-0 sm:px-4">
+            <span className="block text-[11px] text-[var(--app-text-muted)]">
+              Media valenza (-2 a +2)
+            </span>
+            <span className="mt-0.5 block font-mono text-xs sm:text-sm font-semibold text-[var(--app-text)] tabular-nums">
               {avgValenceScore === null
                 ? '—'
                 : `${avgValenceScore > 0 ? '+' : ''}${avgValenceScore.toFixed(2)} (${scoreToVerdict(
@@ -1989,9 +2393,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   )})`}
             </span>
           </div>
-          <div className="py-2 sm:py-0 sm:pl-4">
-            <span className="block text-[11px] text-[var(--app-text-muted)]">Colore più frequente</span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold text-[var(--app-text)]">
+          <div className="py-1.5 sm:py-0 sm:pl-4">
+            <span className="block text-[11px] text-[var(--app-text-muted)]">
+              Colore più frequente
+            </span>
+            <span className="mt-0.5 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-[var(--app-text)]">
               {topColor ? (
                 <>
                   <span
@@ -2021,8 +2427,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             Nessun dato corrisponde ai filtri ({dateRange.label})
           </h3>
           <p className="mt-1 text-xs text-[var(--app-text-muted)] max-w-sm mx-auto leading-relaxed">
-            Prova ad allargare il periodo, rimuovere un filtro colore oppure aggiungi un nuovo
-            appunto vocale per vedere subito i grafici.
+            Prova ad allargare il periodo, rimuovere un filtro oppure aggiungi un nuovo appunto per
+            vedere subito i grafici.
           </p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             {hasCustomFilters && (
@@ -2052,7 +2458,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           blocks={customizableBlocks}
           onChangeLayout={onChangeLayout}
           onResetSection={onResetLayout}
-          className="space-y-4"
+          className="space-y-5"
         />
       )}
     </div>
