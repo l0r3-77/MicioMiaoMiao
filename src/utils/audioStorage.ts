@@ -86,3 +86,19 @@ export async function deleteAudioClip(noteId: string): Promise<void> {
     // Ignore cleanup errors
   }
 }
+
+export async function clearAllAudioClips(): Promise<void> {
+  try {
+    const db = await openAudioDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // Ignore cleanup errors
+  }
+}
+

@@ -42,6 +42,7 @@ import {
 import {
   CAT_EMOTICON_MAP,
   inferCatEmoticonId,
+  reconcileAutoCatEmoticonId,
   resolveCatEmoticonId,
   type CatEmoticonId,
 } from '../utils/catEmoticonLibrary';
@@ -354,7 +355,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       const nowIso = new Date().toISOString();
       const chosenCat =
         manualCatEmoticon ??
-        resolveCatEmoticonId(
+        reconcileAutoCatEmoticonId(
           typeof data.emoji === 'string' ? data.emoji.trim() : undefined,
           cleanText,
           composerBlock
@@ -476,7 +477,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
         id: crypto.randomUUID(),
         block: pasteBlock,
         text: clean,
-        emoji: resolveCatEmoticonId(emojiSuggestions[idx] || undefined, clean, pasteBlock),
+        emoji: reconcileAutoCatEmoticonId(emojiSuggestions[idx] || undefined, clean, pasteBlock),
         color: 'none',
         done: false,
         order: baseOrder + idx,
@@ -1134,8 +1135,20 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 onClick={() => {
                   const clean = modalTextDraft.trim();
                   if (!clean) return;
+                  const oldAuto = inferCatEmoticonId(selectedTodo.text, selectedTodo.block);
+                  const currentResolved = resolveCatEmoticonId(
+                    selectedTodo.emoji,
+                    selectedTodo.text,
+                    selectedTodo.block
+                  );
+                  const shouldAutoUpdateIcon =
+                    clean !== selectedTodo.text &&
+                    (currentResolved === oldAuto || currentResolved === 'cat_note');
                   onUpdateTodo(selectedTodo.id, {
                     text: clean,
+                    ...(shouldAutoUpdateIcon
+                      ? { emoji: reconcileAutoCatEmoticonId(undefined, clean, selectedTodo.block) }
+                      : {}),
                     reminderDate: modalRemDate || undefined,
                     reminderTime: modalRemTime || undefined,
                     updatedAt: new Date().toISOString(),

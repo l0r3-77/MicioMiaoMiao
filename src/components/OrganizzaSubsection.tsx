@@ -46,6 +46,7 @@ import {
 import {
   CAT_EMOTICON_MAP,
   inferCatEmoticonId,
+  reconcileAutoCatEmoticonId,
   resolveCatEmoticonId,
   type CatEmoticonId,
 } from '../utils/catEmoticonLibrary';
@@ -521,7 +522,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       const nowIso = new Date().toISOString();
       const chosenCat =
         manualNewCat ??
-        resolveCatEmoticonId(
+        reconcileAutoCatEmoticonId(
           typeof data.emoji === 'string' ? data.emoji.trim() : undefined,
           cleanText
         );
@@ -646,7 +647,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         date: pasteDate,
         phase: pastePhase,
         text: clean,
-        emoji: resolveCatEmoticonId(emojiSuggestions[idx] || undefined, clean),
+        emoji: reconcileAutoCatEmoticonId(emojiSuggestions[idx] || undefined, clean),
         color: 'none',
         done: false,
         order: baseOrder + idx,
@@ -2031,8 +2032,19 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 e.preventDefault();
                 const clean = editDraftText.trim();
                 if (!clean) return;
+                const oldAuto = inferCatEmoticonId(selectedOrgItem.text);
+                const currentResolved = resolveCatEmoticonId(
+                  selectedOrgItem.emoji,
+                  selectedOrgItem.text
+                );
+                const shouldAutoUpdateIcon =
+                  clean !== selectedOrgItem.text &&
+                  (currentResolved === oldAuto || currentResolved === 'cat_note');
                 onUpdateOrganizeItem(selectedOrgItem.id, {
                   text: clean,
+                  ...(shouldAutoUpdateIcon
+                    ? { emoji: reconcileAutoCatEmoticonId(undefined, clean) }
+                    : {}),
                   reminderDate: editRemDate || undefined,
                   reminderTime: editRemTime || undefined,
                   updatedAt: new Date().toISOString(),

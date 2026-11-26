@@ -32,7 +32,7 @@ import { VoiceRecorderPanel } from './components/VoiceRecorderPanel';
 import type { OrganizeNoteItem, TodoNoteItem } from './types/dailyTodo';
 import type { AgendaViewMode, DailyNote, NoteColor, NoteEntry } from './types/note';
 import { loadAppSettings, saveAppSettings, type AppSettings } from './utils/appSettings';
-import { deleteAudioClip } from './utils/audioStorage';
+import { clearAllAudioClips, deleteAudioClip } from './utils/audioStorage';
 import {
   loadOrganizeItems,
   loadTodoItems,
@@ -704,6 +704,96 @@ export default function App() {
     await deleteAudioClip(entryId);
     setEditingTarget(null);
     setToastMessage('Appunto eliminato');
+  };
+
+  const handleDeleteEntryAudio = async (date: string, entryId: string) => {
+    const nowIso = new Date().toISOString();
+    await deleteAudioClip(entryId);
+    setDailyNotes((prev) =>
+      prev.map((dn) =>
+        dn.date === date
+          ? {
+              ...dn,
+              entries: dn.entries.map((e) =>
+                e.id === entryId && e.audioMetadata
+                  ? {
+                      ...e,
+                      audioMetadata: {
+                        ...e.audioMetadata,
+                        hasAudioClip: false,
+                        sizeBytes: 0,
+                      },
+                      updatedAt: nowIso,
+                    }
+                  : e
+              ),
+              updatedAt: nowIso,
+            }
+          : dn
+      )
+    );
+    setEditingTarget((prev) =>
+      prev && prev.entry.id === entryId && prev.entry.audioMetadata
+        ? {
+            ...prev,
+            entry: {
+              ...prev.entry,
+              audioMetadata: {
+                ...prev.entry.audioMetadata,
+                hasAudioClip: false,
+                sizeBytes: 0,
+              },
+              updatedAt: nowIso,
+            },
+          }
+        : prev
+    );
+    setToastMessage('Audio eliminato (trascrizione e sintesi mantenute)');
+  };
+
+  const handleDeleteAllSavedAudio = async () => {
+    const nowIso = new Date().toISOString();
+    await clearAllAudioClips();
+    setDailyNotes((prev) =>
+      prev.map((dn) => {
+        const hadAudio = dn.entries.some((e) => e.audioMetadata?.hasAudioClip);
+        if (!hadAudio) return dn;
+        return {
+          ...dn,
+          entries: dn.entries.map((e) =>
+            e.audioMetadata?.hasAudioClip
+              ? {
+                  ...e,
+                  audioMetadata: {
+                    ...e.audioMetadata,
+                    hasAudioClip: false,
+                    sizeBytes: 0,
+                  },
+                  updatedAt: nowIso,
+                }
+              : e
+          ),
+          updatedAt: nowIso,
+        };
+      })
+    );
+    setEditingTarget((prev) =>
+      prev && prev.entry.audioMetadata?.hasAudioClip
+        ? {
+            ...prev,
+            entry: {
+              ...prev.entry,
+              audioMetadata: {
+                ...prev.entry.audioMetadata,
+                hasAudioClip: false,
+                sizeBytes: 0,
+              },
+              updatedAt: nowIso,
+            },
+          }
+        : prev
+    );
+    setToastMessage('Tutti i file audio eliminati (trascrizioni e sintesi mantenute)');
   };
 
   const handleTogglePinDay = (date: string) => {
@@ -1631,6 +1721,7 @@ export default function App() {
                 onResetAllLayouts={handleResetAllLayouts}
                 onUpdateSettings={handleUpdateSettings}
                 onApplyRestoredBackup={handleApplyRestoredBackup}
+                onDeleteAllSavedAudio={handleDeleteAllSavedAudio}
                 onNotify={setToastMessage}
               />
             ) : showTodoView ? (
@@ -1974,6 +2065,7 @@ export default function App() {
           onClose={() => setEditingTarget(null)}
           onSaveEntry={handleSaveEntry}
           onDeleteEntry={handleDeleteEntry}
+          onDeleteAudio={handleDeleteEntryAudio}
         />
       )}
 

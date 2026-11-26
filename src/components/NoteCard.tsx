@@ -104,8 +104,8 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
       className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs transition-colors"
     >
       {/* Daily Note Header */}
-      <div className="flex items-start justify-between gap-3 pb-3 border-b border-[var(--app-divider)]">
-        <div className="flex-1 min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-2 pb-3 border-b border-[var(--app-divider)]">
+        <div className="flex-1 min-w-[180px]">
           {isEditingTitle && !compact ? (
             <div className="flex items-center gap-2">
               <input
@@ -132,10 +132,10 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex items-start gap-1 min-w-0">
               <h3
-                className={`font-bold text-[var(--app-text)] truncate ${
-                  compact ? 'text-xs' : 'text-base sm:text-lg'
+                className={`font-bold text-[var(--app-text)] leading-snug break-words ${
+                  compact ? 'text-[11px] sm:text-xs' : 'text-[14.5px] sm:text-lg'
                 }`}
               >
                 {dailyNote.title}
@@ -145,7 +145,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                   type="button"
                   onClick={() => setIsEditingTitle(true)}
                   aria-label="Modifica titolo della giornata"
-                  className="min-h-[32px] min-w-[32px] flex items-center justify-center rounded-lg text-[var(--app-text-subtle)] hover:bg-[var(--app-card-alt)] hover:text-[var(--app-text)]"
+                  className="min-h-[28px] min-w-[28px] shrink-0 flex items-center justify-center rounded-lg text-[var(--app-text-subtle)] hover:bg-[var(--app-card-alt)] hover:text-[var(--app-text)]"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -169,7 +169,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0 -mr-1 -mt-1">
+        <div className="flex items-center gap-1 shrink-0 -mr-1 -mt-0.5 ml-auto">
           {!compact && dailyNote.entries.length > 0 && (
             <>
               <button
@@ -177,7 +177,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                 onClick={() => exportSingleDayNotes(dailyNote, 'excel')}
                 title="Esporta questa giornata in Excel"
                 aria-label="Esporta questa giornata in Excel"
-                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)] hover:text-[var(--app-accent-text)] transition-colors"
+                className="min-h-[34px] min-w-[34px] flex items-center justify-center rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)] hover:text-[var(--app-accent-text)] transition-colors"
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -186,7 +186,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                 onClick={() => exportSingleDayNotes(dailyNote, 'pdf')}
                 title="Esporta questa giornata in PDF"
                 aria-label="Esporta questa giornata in PDF"
-                className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)] hover:text-[var(--app-accent-text)] transition-colors"
+                className="min-h-[34px] min-w-[34px] flex items-center justify-center rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] text-[var(--app-text-muted)] hover:border-[var(--app-accent-soft-border)] hover:text-[var(--app-accent-text)] transition-colors"
               >
                 <FileText className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
@@ -199,7 +199,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
               disabled={isGeneratingDaily}
               onClick={handleDailySummaryClick}
               title="Aggiorna sintesi della giornata"
-              className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] px-2.5 py-1.5 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-50 transition-colors whitespace-nowrap"
+              className="min-h-[34px] inline-flex items-center gap-1.5 rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] px-2 py-1 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-50 transition-colors whitespace-nowrap"
             >
               {isGeneratingDaily ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -216,7 +216,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
             aria-label={dailyNote.pinned ? 'Rimuovi nota appuntata' : 'Appunta nota del giorno'}
             aria-pressed={dailyNote.pinned}
             className={`flex items-center justify-center rounded-xl transition-colors ${
-              compact ? 'min-h-[36px] min-w-[36px]' : 'min-h-[42px] min-w-[42px]'
+              compact ? 'min-h-[32px] min-w-[32px]' : 'min-h-[36px] min-w-[36px]'
             } ${
               dailyNote.pinned
                 ? 'text-[var(--app-accent-text)] bg-[var(--app-accent-soft)] hover:opacity-90'
@@ -342,7 +342,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
                       <span className={`h-2 w-2 rounded-full ${colMeta.dotClass}`} aria-hidden="true" />
                       {colMeta.label}
                     </span>
-                    {!compact && entry.audioMetadata && (
+                    {!compact && entry.audioMetadata && entry.audioMetadata.hasAudioClip && (
                       <>
                         <span aria-hidden="true" className="text-[var(--app-text-subtle)]">·</span>
                         <span className="inline-flex items-center gap-1 font-mono text-[11px] text-[var(--app-text-subtle)] tabular-nums">

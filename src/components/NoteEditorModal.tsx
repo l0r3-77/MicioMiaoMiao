@@ -16,7 +16,7 @@ import {
 import { blobToBase64 } from '../hooks/useVoiceRecorder';
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
 import { fetchApiJsonWithRetry } from '../utils/apiError';
-import { getAudioClip } from '../utils/audioStorage';
+import { deleteAudioClip, getAudioClip } from '../utils/audioStorage';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
 import { formatBytes, formatDuration, formatRecordedDateTime } from '../utils/dateUtils';
 import {
@@ -38,6 +38,7 @@ interface NoteEditorModalProps {
   onClose: () => void;
   onSaveEntry: (originalDate: string, targetDate: string, updatedEntry: NoteEntry) => void;
   onDeleteEntry: (date: string, entryId: string) => void;
+  onDeleteAudio?: (date: string, entryId: string) => Promise<void> | void;
 }
 
 export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
@@ -47,6 +48,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
   onClose,
   onSaveEntry,
   onDeleteEntry,
+  onDeleteAudio,
 }) => {
   const [date, setDate] = useState(dailyNote.date);
   const [time, setTime] = useState(typeof entry.time === 'string' ? entry.time : '09:00');
@@ -71,6 +73,11 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioDeleted, setAudioDeleted] = useState(
+    Boolean(entry.audioMetadata && !entry.audioMetadata.hasAudioClip)
+  );
+  const [confirmDeleteAudio, setConfirmDeleteAudio] = useState(false);
+  const [isDeletingAudio, setIsDeletingAudio] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -78,7 +85,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
 
   useEffect(() => {
     let activeUrl: string | null = null;
-    if (entry.audioMetadata?.hasAudioClip) {
+    if (entry.audioMetadata?.hasAudioClip && !audioDeleted) {
       getAudioClip(entry.id).then((blob) => {
         if (blob) {
           setAudioBlob(blob);
@@ -86,13 +93,33 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
           setAudioUrl(activeUrl);
         }
       });
+    } else {
+      setAudioBlob(null);
+      setAudioUrl(null);
     }
     return () => {
       if (activeUrl) {
         URL.revokeObjectURL(activeUrl);
       }
     };
-  }, [entry.id, entry.audioMetadata?.hasAudioClip]);
+  }, [entry.id, entry.audioMetadata?.hasAudioClip, audioDeleted]);
+
+  const handleDeleteAudioOnly = async () => {
+    setIsDeletingAudio(true);
+    try {
+      await deleteAudioClip(entry.id);
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+      setAudioUrl(null);
+      setAudioBlob(null);
+      setAudioDeleted(true);
+      setConfirmDeleteAudio(false);
+      await onDeleteAudio?.(dailyNote.date, entry.id);
+    } finally {
+      setIsDeletingAudio(false);
+    }
+  };
 
   const handleBulletChange = (index: number, value: string) => {
     setBullets((prev) => prev.map((b, i) => (i === index ? value : b)));
@@ -235,6 +262,13 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
       transcript: safeTranscript,
       bullets: cleanedBullets,
       reminders: cleanedReminders,
+      ...(entry.audioMetadata
+        ? {
+            audioMetadata: audioDeleted
+              ? { ...entry.audioMetadata, hasAudioClip: false, sizeBytes: 0 }
+              : entry.audioMetadata,
+          }
+        : {}),
       updatedAt: new Date().toISOString(),
     });
   };
@@ -270,7 +304,10 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
               className={`h-3 w-3 rounded-full border shrink-0 ${activeColorMeta.swatchClass}`}
               aria-hidden="true"
             />
-            <h2 id="editor-modal-title" className="text-base font-bold text-[var(--app-text)] truncate">
+            <h2
+              id="editor-modal-title"
+              className="text-sm sm:text-base font-bold text-[var(--app-text)] leading-snug break-words"
+            >
               Modifica appunto · {dailyNote.title}
             </h2>
           </div>
@@ -418,29 +455,35 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
               </p>
             ) : (
               <div className="space-y-2">
-                {bullets.map((bullet, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-[var(--app-accent)] shrink-0"
-                      aria-hidden="true"
-                    />
-                    <input
-                      type="text"
-                      value={bullet}
-                      onChange={(e) => handleBulletChange(idx, e.target.value)}
-                      placeholder="Es. Stress: alto, Focus: esaurito..."
-                      className="flex-1 min-h-[42px] rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] px-3 py-2 text-sm text-[var(--app-text)] focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveBullet(idx)}
-                      aria-label={`Rimuovi punto ${idx + 1}`}
-                      className="min-h-[42px] min-w-[42px] flex items-center justify-center rounded-xl text-[var(--app-text-subtle)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition-colors"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
+                {bullets.map((bullet, idx) => {
+                  const estimatedRows = Math.min(
+                    5,
+                    Math.max(2, Math.ceil(Math.max(1, bullet.length) / 34))
+                  );
+                  return (
+                    <div key={idx} className="flex items-start gap-2">
+                      <span
+                        className="mt-3.5 h-1.5 w-1.5 rounded-full bg-[var(--app-accent)] shrink-0"
+                        aria-hidden="true"
+                      />
+                      <textarea
+                        rows={estimatedRows}
+                        value={bullet}
+                        onChange={(e) => handleBulletChange(idx, e.target.value)}
+                        placeholder="Es. Stress: alto, Focus: esaurito..."
+                        className="flex-1 min-h-[50px] resize-y rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] px-3 py-2 text-xs sm:text-sm leading-snug text-[var(--app-text)] focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBullet(idx)}
+                        aria-label={`Rimuovi punto ${idx + 1}`}
+                        className="mt-0.5 min-h-[42px] min-w-[42px] flex items-center justify-center rounded-xl text-[var(--app-text-subtle)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition-colors shrink-0"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -479,7 +522,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
 
             {reminders.length === 0 ? (
               <p className="text-xs text-[var(--app-text-subtle)]">
-                Nessun promemoria rilevato (es. “potrei fare…”, “forse dovrei…”, “mi sa che se…”).
+                Nessun promemoria rilevato (es. domande con “?”, “come posso…?”, “potrei provare…”, “devo fare…”).
               </p>
             ) : (
               <div className="space-y-2">
@@ -517,27 +560,67 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
           {/* Audio Metadata & Playback */}
           {entry.audioMetadata && (
             <div className="rounded-2xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-[var(--app-text)]">
-                  <Mic className="h-4 w-4 text-[var(--app-accent)]" aria-hidden="true" />
+                  <Mic className="h-4 w-4 text-[var(--app-accent)] shrink-0" aria-hidden="true" />
                   <span>Metadati registrazione audio</span>
                 </div>
-                {audioBlob && (
-                  <button
-                    type="button"
-                    disabled={isTranscribing}
-                    onClick={handleTranscribeSavedAudio}
-                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[var(--app-border-soft)] bg-[var(--app-card)] px-2.5 py-1 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-50 transition-colors"
-                  >
-                    {isTranscribing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                    )}
-                    <span>{(transcript || '').trim() ? 'Ritrascrivi' : 'Trascrivi audio'}</span>
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {audioBlob && !audioDeleted && (
+                    <button
+                      type="button"
+                      disabled={isTranscribing}
+                      onClick={handleTranscribeSavedAudio}
+                      className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-[var(--app-border-soft)] bg-[var(--app-card)] px-2.5 py-1 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)] disabled:opacity-50 transition-colors"
+                    >
+                      {isTranscribing ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      )}
+                      <span>{(transcript || '').trim() ? 'Ritrascrivi' : 'Trascrivi audio'}</span>
+                    </button>
+                  )}
+
+                  {!audioDeleted && entry.audioMetadata.hasAudioClip && !confirmDeleteAudio && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteAudio(true)}
+                      className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-rose-200 dark:border-rose-500/35 bg-[var(--app-card)] px-2.5 py-1 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Elimina audio</span>
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {confirmDeleteAudio && !audioDeleted && (
+                <div className="rounded-xl border border-rose-200 dark:border-rose-500/40 bg-rose-50/70 dark:bg-rose-950/30 p-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[11px] text-rose-800 dark:text-rose-200 leading-snug">
+                    Eliminare il file audio? La trascrizione e la sintesi già salvate restano intatte.
+                  </p>
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <button
+                      type="button"
+                      disabled={isDeletingAudio}
+                      onClick={handleDeleteAudioOnly}
+                      className="min-h-[32px] rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                    >
+                      {isDeletingAudio ? 'Elimino...' : 'Conferma elimina solo audio'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isDeletingAudio}
+                      onClick={() => setConfirmDeleteAudio(false)}
+                      className="min-h-[32px] rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card)]"
+                    >
+                      Annulla
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-[var(--app-text-muted)]">
                 <div>
                   <span className="block text-[11px] text-[var(--app-text-subtle)]">Data e ora registrazione</span>
@@ -554,13 +637,20 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                 <div>
                   <span className="block text-[11px] text-[var(--app-text-subtle)]">Formato e dimensione</span>
                   <span className="font-mono text-[var(--app-text)] tabular-nums">
-                    {entry.audioMetadata.mimeType.replace('audio/', '').toUpperCase()} ·{' '}
-                    {formatBytes(entry.audioMetadata.sizeBytes)}
+                    {audioDeleted || !entry.audioMetadata.hasAudioClip
+                      ? 'Audio rimosso'
+                      : `${entry.audioMetadata.mimeType.replace('audio/', '').toUpperCase()} · ${formatBytes(
+                          entry.audioMetadata.sizeBytes
+                        )}`}
                   </span>
                 </div>
               </div>
-              {audioUrl && (
-                <audio controls src={audioUrl} className="w-full h-10" preload="metadata" />
+              {audioDeleted || !entry.audioMetadata.hasAudioClip ? (
+                <p className="rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card)] px-3 py-2 text-[11px] text-[var(--app-text-muted)]">
+                  File audio eliminato dal dispositivo — trascrizione e sintesi mantenute.
+                </p>
+              ) : (
+                audioUrl && <audio controls src={audioUrl} className="w-full h-10" preload="metadata" />
               )}
             </div>
           )}

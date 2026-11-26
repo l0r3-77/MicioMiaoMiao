@@ -16,11 +16,13 @@ import {
   Share2,
   Sliders,
   Sun,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import type { OrganizeNoteItem, TodoNoteItem } from '../types/dailyTodo';
 import type { DailyNote } from '../types/note';
 import type { AppSettings, ThemeMode } from '../utils/appSettings';
+import { formatBytes } from '../utils/dateUtils';
 import {
   APP_COLOR_PRESET_OPTIONS,
   TODO_COLOR_PRESET_OPTIONS,
@@ -68,14 +70,21 @@ interface SettingsViewProps {
     payload: AgendaVoceBackupPayload,
     mode: 'merge' | 'replace'
   ) => Promise<void>;
+  onDeleteAllSavedAudio?: () => Promise<void>;
   onNotify: (msg: string) => void;
 }
 
-type PendingModal = {
-  kind: 'confirm_restore';
-  sourceLabel: string;
-  payload: AgendaVoceBackupPayload;
-};
+type PendingModal =
+  | {
+      kind: 'confirm_restore';
+      sourceLabel: string;
+      payload: AgendaVoceBackupPayload;
+    }
+  | {
+      kind: 'confirm_delete_all_audio';
+      count: number;
+      totalBytes: number;
+    };
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   dailyNotes,
@@ -89,6 +98,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onResetAllLayouts,
   onUpdateSettings,
   onApplyRestoredBackup,
+  onDeleteAllSavedAudio,
   onNotify,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -101,6 +111,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const neko = CHIBI_CAT_MASCOTS.zen;
   const totalEntriesCount = dailyNotes.reduce((acc, d) => acc + d.entries.length, 0);
+  const savedAudioStats = dailyNotes.reduce(
+    (acc, dn) => {
+      for (const entry of dn.entries) {
+        if (entry.audioMetadata?.hasAudioClip) {
+          acc.count += 1;
+          acc.totalBytes += entry.audioMetadata.sizeBytes || 0;
+        }
+      }
+      return acc;
+    },
+    { count: 0, totalBytes: 0 }
+  );
   const canShareFiles =
     typeof navigator !== 'undefined' && typeof navigator.share === 'function';
   const canPickDirectFile = supportsDirectFileOverwritePicker();
@@ -542,6 +564,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             )}
           </div>
+
+          {onDeleteAllSavedAudio && (
+            <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3.5 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-[var(--app-text)]">
+                  Audio salvati sul dispositivo ({savedAudioStats.count}{' '}
+                  {savedAudioStats.count === 1 ? 'clip' : 'clip'}
+                  {savedAudioStats.totalBytes > 0
+                    ? ` · ${formatBytes(savedAudioStats.totalBytes)}`
+                    : ''}
+                  )
+                </p>
+                <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5 leading-snug">
+                  Cancella solo i file audio per liberare spazio: trascrizioni, sensazioni e
+                  promemoria già salvati negli appunti restano intatti.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={localActionLoading || savedAudioStats.count === 0}
+                onClick={() =>
+                  setPendingModal({
+                    kind: 'confirm_delete_all_audio',
+                    count: savedAudioStats.count,
+                    totalBytes: savedAudioStats.totalBytes,
+                  })
+                }
+                className="min-h-[38px] inline-flex items-center gap-1.5 rounded-xl border border-rose-200 dark:border-rose-500/40 bg-[var(--app-card)] px-3 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-45 disabled:pointer-events-none transition-colors shrink-0"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Cancella audio salvati</span>
+              </button>
+            </div>
+          )}
         </section>
       ),
     },
@@ -571,8 +627,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   Estrai promemoria automaticamente
                 </p>
                 <p className="text-[11px] text-[var(--app-text-muted)] mt-0.5">
-                  Rileva frasi intere come “potrei fare…”, “forse dovrei…”, “mi sa che se…” in ogni
-                  appunto.
+                  Rileva frasi da ricordare, domande su benessere/focus/vita (con “?”) e possibili
+                  soluzioni o azioni in ogni appunto.
                 </p>
               </div>
             </div>
@@ -733,7 +789,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl bg-[var(--app-card)] border border-[var(--app-border)] p-5 shadow-2xl space-y-4 pb-safe"
             onClick={(e) => e.stopPropagation()}
           >
-            {pendingModal.kind === 'confirm_restore' && (
+            {pendingModal.kind === 'confirm_restore' ? (
               <>
                 <div>
                   <h3 id="settings-confirm-title" className="text-sm font-bold text-[var(--app-text)]">
@@ -778,6 +834,50 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     className="w-full min-h-[44px] rounded-xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-950/40 px-4 py-2.5 text-xs font-semibold text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-900/50 disabled:opacity-50"
                   >
                     Sostituisci tutti i dati locali con questo backup
+                  </button>
+                  <button
+                    type="button"
+                    disabled={restoreInProgress}
+                    onClick={() => setPendingModal(null)}
+                    className="w-full min-h-[44px] rounded-xl px-4 py-2 text-xs font-medium text-[var(--app-text-muted)] hover:bg-[var(--app-card-alt)]"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <h3 id="settings-confirm-title" className="text-sm font-bold text-[var(--app-text)]">
+                    Cancella tutti gli audio salvati
+                  </h3>
+                  <p className="mt-1 text-xs text-[var(--app-text-muted)] leading-relaxed">
+                    Verranno eliminati <strong>{pendingModal.count} clip audio</strong>
+                    {pendingModal.totalBytes > 0 ? ` (${formatBytes(pendingModal.totalBytes)})` : ''}{' '}
+                    dal dispositivo. Le trascrizioni, le sensazioni sintetizzate e i promemoria di
+                    tutti gli appunti resteranno salvati.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    disabled={restoreInProgress}
+                    onClick={async () => {
+                      if (!onDeleteAllSavedAudio) return;
+                      setRestoreInProgress(true);
+                      try {
+                        await onDeleteAllSavedAudio();
+                        setPendingModal(null);
+                      } finally {
+                        setRestoreInProgress(false);
+                      }
+                    }}
+                    className="w-full min-h-[44px] rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    {restoreInProgress
+                      ? 'Eliminazione in corso...'
+                      : 'Elimina solo i file audio salvati'}
                   </button>
                   <button
                     type="button"

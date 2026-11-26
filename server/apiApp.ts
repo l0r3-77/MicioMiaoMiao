@@ -170,15 +170,20 @@ export const CAT_EMOTICON_IDS = [
   'cat_dentist',
   'cat_shop',
   'cat_food',
+  'cat_cook',
   'cat_pizza',
   'cat_coffee',
+  'cat_water',
   'cat_drink',
   'cat_call',
   'cat_email',
   'cat_work',
+  'cat_paperwork',
   'cat_computer',
+  'cat_battery',
   'cat_book',
   'cat_sport',
+  'cat_meditate',
   'cat_bike',
   'cat_music',
   'cat_movie',
@@ -186,6 +191,11 @@ export const CAT_EMOTICON_IDS = [
   'cat_camera',
   'cat_gift',
   'cat_clothes',
+  'cat_bag',
+  'cat_shoes',
+  'cat_glasses',
+  'cat_clock',
+  'cat_bed',
   'cat_sun',
   'cat_mountain',
   'cat_baby',
@@ -530,7 +540,7 @@ type SuggestedColor = 'celeste' | 'sky' | 'amber' | 'light_red' | 'red' | 'anthr
 const VALID_COLORS: SuggestedColor[] = ['celeste', 'sky', 'amber', 'light_red', 'red', 'anthracite'];
 
 const SERVER_REMINDER_REGEX =
-  /\b(potrei|forse\s+dovrei|forse\s+potrei|dovrei|mi\s+sa\s+che|se\s+(?:faccio|dico|penso|provo|chiedo|chiamo|scrivo|vado|aspetto|lascio|parlo)|devo\s+(?:fare|dire|ricordar|chiamar|scriver|mandar|inviar|parlar|comprar|prenotar|pagar|controllar|fissar|organizzar|finir|mandare)|ricordarmi|da\s+ricordare|non\s+(?:devo\s+)?dimenticar|sarebbe\s+(?:meglio|utile|opportuno|bene)|converrebbe|mi\s+conviene|bisogna\s+che|bisognerebbe|magari\s+(?:faccio|provo|chiamo|scrivo|prendo|cambio|proviamo)|appena\s+posso|la\s+prossima\s+volta|domani\s+(?:faccio|chiamo|scrivo|provo|devo|potrei)|proverò\s+a|devo\s+assolutamente|faccio\s+prima\s+a|meglio\s+se)\b/i;
+  /\b(potrei|forse\s+dovrei|forse\s+potrei|dovrei|mi\s+sa\s+che|se\s+(?:faccio|dico|penso|provo|chiedo|chiamo|scrivo|vado|aspetto|lascio|parlo|provo\s+a)|devo\s+(?:fare|dire|ricordar|chiamar|scriver|mandar|inviar|parlar|comprar|prenotar|pagar|controllar|fissar|organizzar|finir|mandare|capire|provare|cambiare|migliorare)|ricordarmi|da\s+ricordare|non\s+(?:devo\s+)?dimenticar|sarebbe\s+(?:meglio|utile|opportuno|bene)|converrebbe|mi\s+conviene|bisogna\s+che|bisognerebbe|magari\s+(?:faccio|provo|chiamo|scrivo|prendo|cambio|proviamo)|appena\s+posso|la\s+prossima\s+volta|domani\s+(?:faccio|chiamo|scrivo|provo|devo|potrei)|proverò\s+a|devo\s+assolutamente|faccio\s+prima\s+a|meglio\s+se|mi\s+chiedo|mi\s+domando|chissà\s+(?:se|come|perché|cosa)|come\s+(?:posso|faccio|potrei|dovrei|riuscire)|perché\s+(?:mi\s+sento|non\s+riesco|faccio|succede|continuo)|cosa\s+(?:posso|potrei|dovrei|mi\s+fa|è\s+meglio)|ha\s+senso|vale\s+la\s+pena|e\s+se\s+(?:provassi|provo|facessi|faccio|cambiassi)|vorrei\s+(?:capire|provare|riuscire|stare\s+meglio)|benessere|modo\s+di\s+vivere|stile\s+di\s+vita|per\s+stare\s+meglio|per\s+(?:il\s+mio\s+)?focus|per\s+concentrarmi|una\s+soluzione\s+(?:è|sarebbe|potrebbe)|un['’]?idea\s+sarebbe|mi\s+farebbe\s+bene|mi\s+aiuterebbe\s+a)\b/i;
 
 function extractRemindersFallback(text: string): string[] {
   if (!text || typeof text !== 'string') return [];
@@ -543,7 +553,8 @@ function extractRemindersFallback(text: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const s of sentences) {
-    if (SERVER_REMINDER_REGEX.test(s)) {
+    const isQuestion = s.includes('?') && s.length >= 8;
+    if (isQuestion || SERVER_REMINDER_REGEX.test(s)) {
       const k = s.toLowerCase();
       if (!seen.has(k)) {
         seen.add(k);
@@ -722,52 +733,82 @@ function parseGeminiJson<T>(raw: string): T | null {
   }
 }
 
+function inferSpecificServerCatIcon(text: string): string | null {
+  const clean = (text || '').trim();
+  if (!clean) return null;
+
+  // 1. High-specificity compound phrases & everyday objects
+  if (/\b(lavatric\w*|asciugatric\w*|bucat\w*|panni\b|stend\w*|stirar\w*|stiro|lavanderi\w*|detersiv\w*)\b/i.test(clean)) return 'cat_laundry';
+  if (/\b(lavaggio\s+auto|(pulir\w*|pulisc\w*|lavar\w*)\s+(l['’]?\s*)?(auto|macchina))\b/i.test(clean)) return 'cat_car';
+  if (/\b(pulisc\w*|pulir\w*|puliz\w*|pulit\w*|spolver\w*|riordin\w*|aspirapolver\w*|mocio|igienizz\w*|sanific\w*|scopar\w*|piatt\w*|lavastovigli\w*|paviment\w*|sgrass\w*)\b/i.test(clean)) return 'cat_clean';
+  if (/\b(bors[ae]|borsett\w*|zain\w*|tracoll\w*|marsupio|sacca(\s+palestra)?|valigett\w*|tote|trolley)\b/i.test(clean)) return 'cat_bag';
+  if (/\b(scarp\w*|sneaker\w*|stival\w*|ciabatt\w*|sandal\w*|calzatur\w*)\b/i.test(clean)) return 'cat_shoes';
+  if (/\b(occhial\w*|lenti(\s+a\s+contatto)?|ottico|colliri\w*)\b/i.test(clean)) return 'cat_glasses';
+  if (/\b(caricar\w*\s+(il\s+)?(telefono|cellulare|iphone|watch|orologio|powerbank|tablet|cuffie)|batteri\w*|powerbank|caricator\w*|caricabatteri\w*)\b/i.test(clean)) return 'cat_battery';
+  if (/\b(rifar\w*\s+(il\s+)?letto|cambi\w*\s+(le\s+)?lenzuol\w*|lenzuol\w*|fedor\w*|copripiumin\w*)\b/i.test(clean)) return 'cat_bed';
+  if (/\b(lavar\w*\s+i\s+denti|spazzolin\w*|dentist\w*|denti|carie|igiene\s+dentale)\b/i.test(clean)) return 'cat_dentist';
+  if (/\b(ber[ei]\s+(pi[uù]\s+)?acqua|borraccia|idrataz\w*)\b/i.test(clean)) return 'cat_water';
+
+  // 2. Domain keywords in strict priority order
+  if (/\b(benzin\w*|gpl|diesel|gasolio|riforniment\w*|carburant\w*|benzinaio)\b/i.test(clean)) return 'cat_fuel';
+  if (/\b(barber\w*|barbier\w*|parrucchier\w*|capell\w*|barba)\b/i.test(clean)) return 'cat_barber';
+  if (/\b(pacco|pacchi|corriere|spedizion\w*|posta|poste|ufficio\s+postale|amazon|vinted)\b/i.test(clean)) return 'cat_package';
+  if (/\b(document\w*|patente|passaport\w*|carta\s+d['’]identit[aà]|anagrafe|pratic[ae]|spid|firma\w*)\b/i.test(clean)) return 'cat_paperwork';
+  if (/\b(spazzatur\w*|immondiz\w*|differenziat\w*|ricicl\w*|rifiut\w*|bidon\w*|umido|organico)\b/i.test(clean)) return 'cat_trash';
+  if (/\b(farmac\w*|pillol\w*|medicin\w*|tachipirin\w*|ibuprofen\w*|ricett\w*|integrator\w*)\b/i.test(clean)) return 'cat_pharmacy';
+  if (/\b(ripar\w*|aggiust\w*|attrezz\w*|martell\w*|trapan\w*|cacciavit\w*|idraulic\w*|elettricist\w*|ferrament\w*|caldaia)\b/i.test(clean)) return 'cat_repair';
+  if (/\b(piant\w*|giardin\w*|fior\w*|innaffi\w*|potar\w*|orto|vaso|vasi)\b/i.test(clean)) return 'cat_garden';
+  if (/\b(treno|stazion\w*|metro|metropolitan\w*|bus|autobus|tram)\b/i.test(clean)) return 'cat_train';
+  if (/\b(aere\w*|volo|voli|aeroport\w*|valigi\w*|imbarc\w*|viagg\w*)\b/i.test(clean)) return 'cat_plane';
+  if (/\b(chiav\w*|serratur\w*|lucchett\w*)\b/i.test(clean)) return 'cat_keys';
+  if (/\b(svegli\w*|orolog\w*|puntual\w*|appuntament\w*|promemori\w*)\b/i.test(clean)) return 'cat_clock';
+  if (/\b(vestit\w*|magli\w*|pantalon\w*|armadi\w*|camic\w*|giacc\w*)\b/i.test(clean)) return 'cat_clothes';
+  if (/\b(banc\w*|bancomat|bonific\w*|portafogli|preliev\w*|euro|sold\w*|pagar\w*)\b/i.test(clean)) return 'cat_bank';
+  if (/\b(bollett\w*|fattur\w*|affitt\w*|tass\w*|abbonament\w*|f24|multa)\b/i.test(clean)) return 'cat_bills';
+  if (/\b(pizz\w*|hamburger|kebab|panin\w*|takeaway|asporto)\b/i.test(clean)) return 'cat_pizza';
+  if (/\b(aperitiv\w*|spritz|birr\w*|vino|cocktail|bevand\w*)\b/i.test(clean)) return 'cat_drink';
+  if (/\b(caff[eè]|colazion\w*|cappuccin\w*|cornett\w*|bar\b)\b/i.test(clean)) return 'cat_coffee';
+  if (/\b(cucin\w*|pentol\w*|padell\w*|fornell\w*|soffritto|sugo|bollir\w*)\b/i.test(clean)) return 'cat_cook';
+  if (/\b(pranz\w*|cen[ae]|mangiar\w*|ristorant\w*|cibo|sushi)\b/i.test(clean)) return 'cat_food';
+  if (/\b(docci\w*|shampoo|skincare|sapone|crema|depilaz\w*)\b/i.test(clean)) return 'cat_shower';
+  if (/\b(dottor\w*|medic\w*|visit\w*|analis\w*|salut\w*|ospedal\w*)\b/i.test(clean)) return 'cat_health';
+  if (/\b(can[ei]|gatt\w*|mici\w*|veterinar\w*|croccant\w*|lettier\w*)\b/i.test(clean)) return 'cat_pet';
+  if (/\b(auto|macchin\w*|gomm\w*|meccanic\w*|tagliand\w*|revisione|parchegg\w*)\b/i.test(clean)) return 'cat_car';
+  if (/\b(spes\w*|supermercat\w*|compro|compri|compra|comprar\w*|acquist\w*|negoz\w*|pane|latte|frutta|verdur\w*)\b/i.test(clean)) return 'cat_shop';
+  if (/\b(email|mail|e-mail|pec|inviar\w*|mandar\w*\s+mail)\b/i.test(clean)) return 'cat_email';
+  if (/\b(chiam\w*|telefon\w*|whatsapp|sms|contattar\w*)\b/i.test(clean)) return 'cat_call';
+  if (/\b(pc\b|computer|portatil\w*|laptop|schermo|stampant\w*|software|tablet)\b/i.test(clean)) return 'cat_computer';
+  if (/\b(lavor\w*|uffic\w*|riunion\w*|progett\w*|smart\s*working)\b/i.test(clean)) return 'cat_work';
+  if (/\b(libr\w*|studi\w*|esam\w*|legger\w*|universit\w*|scuol\w*)\b/i.test(clean)) return 'cat_book';
+  if (/\b(medit\w*|respir\w*|yoga|stretching|mindfulness|zen)\b/i.test(clean)) return 'cat_meditate';
+  if (/\b(bici\w*|ciclism\w*|casco)\b/i.test(clean)) return 'cat_bike';
+  if (/\b(sport|palestr\w*|corsa|correr\w*|allenament\w*|piscin\w*|pesi|workout)\b/i.test(clean)) return 'cat_sport';
+  if (/\b(foto\w*|camera|selfie|scatt\w*)\b/i.test(clean)) return 'cat_camera';
+  if (/\b(music\w*|concert\w*|canzon\w*|spotify|podcast|cuffie)\b/i.test(clean)) return 'cat_music';
+  if (/\b(film|cinema|netflix|serie|tv)\b/i.test(clean)) return 'cat_movie';
+  if (/\b(gioc\w*|videogioc\w*|ps5|switch|xbox|partita)\b/i.test(clean)) return 'cat_game';
+  if (/\b(regal\w*|compleann\w*|festa|party|sorpresa)\b/i.test(clean)) return 'cat_gift';
+  if (/\b(montagn\w*|trekking|escursion\w*|sentier\w*|campegg\w*)\b/i.test(clean)) return 'cat_mountain';
+  if (/\b(sole|mare|spiaggi\w*|vacanz\w*|parco)\b/i.test(clean)) return 'cat_sun';
+  if (/\b(figl\w*|bimb\w*|bambin\w*|mamma|pap[aà]|famigl\w*)\b/i.test(clean)) return 'cat_baby';
+  if (/\b(casa|condomini\w*|mobil\w*|stanz\w*)\b/i.test(clean)) return 'cat_home';
+  if (/\b(urgent\w*|subito|emergenz\w*|immediat\w*|scadenz\w*)\b/i.test(clean)) return 'cat_fire';
+  if (/\b(dormir\w*|sonn\w*|ripos\w*|nott\w*|letto)\b/i.test(clean)) return 'cat_sleep';
+  if (/\b(idea|pensar\w*|invent\w*|creativ\w*)\b/i.test(clean)) return 'cat_idea';
+  return null;
+}
+
 function inferServerCatIconFallback(text: string): string {
-  const lower = (text || '').toLowerCase();
-  if (/benzina|gpl|diesel|gasolio|rifornimento|carburante/.test(lower)) return 'cat_fuel';
-  if (/barber|barbiere|parrucchiere|capelli|barba/.test(lower)) return 'cat_barber';
-  if (/pacco|pacchi|corriere|spedizion|posta|poste|amazon/.test(lower)) return 'cat_package';
-  if (/lavatric|bucato|stendere|stirare|panni/.test(lower)) return 'cat_laundry';
-  if (/spazzatur|immondiz|differenziat|ricicl|bidon/.test(lower)) return 'cat_trash';
-  if (/farmac|pillol|medicin|tachipirin|ibuprofen|ricetta/.test(lower)) return 'cat_pharmacy';
-  if (/dentist|denti|carie|igiene dentale/.test(lower)) return 'cat_dentist';
-  if (/riparaz|attrezz|martello|trapano|cacciavite|idraulic|elettricist|ferramenta/.test(lower)) return 'cat_repair';
-  if (/piant|giardin|fiori|innaffiar|potar|orto/.test(lower)) return 'cat_garden';
-  if (/treno|stazione|metro|bus|autobus|tram/.test(lower)) return 'cat_train';
-  if (/aereo|volo|aeroporto|valigia|imbarco/.test(lower)) return 'cat_plane';
-  if (/chiav|serratura|lucchetto|aprire/.test(lower)) return 'cat_keys';
-  if (/vestit|maglia|pantalon|scarpe|armadio|cambio/.test(lower)) return 'cat_clothes';
-  if (/banca|bancomat|carta|bonifico|portafogli|preliev|euro/.test(lower)) return 'cat_bank';
-  if (/pizz|hamburger|kebab|panin|takeaway|asporto/.test(lower)) return 'cat_pizza';
-  if (/aperitiv|spritz|birra|vino|cocktail|bevanda/.test(lower)) return 'cat_drink';
-  if (/email|mail|e-mail|pec|inviare|posta elettronica/.test(lower)) return 'cat_email';
-  if (/pc\b|computer|portatile|laptop|schermo|stampant|software/.test(lower)) return 'cat_computer';
-  if (/bici|bicicletta|ciclismo|casco/.test(lower)) return 'cat_bike';
-  if (/foto|camera|fotocamera|selfie|scatt/.test(lower)) return 'cat_camera';
-  if (/montagn|trekking|escursion|sentiero|campeggio/.test(lower)) return 'cat_mountain';
-  if (/doccia|bagno|lavar|shampoo/.test(lower)) return 'cat_shower';
-  if (/puliz|pulire|spazz|aspirapolvere|mocio|piatti|lavastovigli/.test(lower)) return 'cat_clean';
-  if (/auto|macchina|gomme|meccanico|tagliando|revisione|parcheggio/.test(lower)) return 'cat_car';
-  if (/bollett|pagament|fattura|affitto|tasse|abbonamento/.test(lower)) return 'cat_bills';
-  if (/cane|gatto|micio|veterinar|croccant/.test(lower)) return 'cat_pet';
-  if (/dottor|medic|visita|analisi|salute|ospedale/.test(lower)) return 'cat_health';
-  if (/spesa|supermercato|comprar|acquist|negozio|pane|latte/.test(lower)) return 'cat_shop';
-  if (/caff[eè]|colazion|bar\b|cappuccino|cornetto/.test(lower)) return 'cat_coffee';
-  if (/pranz|cena|cucin|mangi|ristorante/.test(lower)) return 'cat_food';
-  if (/chiamar|telefon|whatsapp|sms|contattare/.test(lower)) return 'cat_call';
-  if (/lavor|ufficio|riunion|progetto|call\b|smart working/.test(lower)) return 'cat_work';
-  if (/libr|studi|esame|legger|universit|scuola/.test(lower)) return 'cat_book';
-  if (/sport|palestra|corsa|correr|allenament|piscina|pesi|workout/.test(lower)) return 'cat_sport';
-  if (/music|concert|canzon|spotify|podcast|cuffie/.test(lower)) return 'cat_music';
-  if (/film|cinema|netflix|serie|tv/.test(lower)) return 'cat_movie';
-  if (/gioc|videogioc|ps5|switch|xbox|partita/.test(lower)) return 'cat_game';
-  if (/regal|compleann|festa|party|sorpresa/.test(lower)) return 'cat_gift';
-  if (/sole|mare|spiaggi|vacanza|piscina|parco/.test(lower)) return 'cat_sun';
-  if (/figl|bimb|bambin|mamma|papà|famigl/.test(lower)) return 'cat_baby';
-  if (/casa|condomini|mobili|stanza/.test(lower)) return 'cat_home';
-  if (/urgent|subito|emergenz|immediat|scadenz/.test(lower)) return 'cat_fire';
-  if (/dormir|sonn|letto|ripos|notte/.test(lower)) return 'cat_sleep';
-  if (/idea|pensar|invent|creativ/.test(lower)) return 'cat_idea';
+  return inferSpecificServerCatIcon(text) || 'cat_note';
+}
+
+function reconcileServerCatIcon(aiEmoji: unknown, text: string): string {
+  const specific = inferSpecificServerCatIcon(text);
+  if (specific) return specific;
+  if (typeof aiEmoji === 'string') {
+    const trimmed = aiEmoji.trim();
+    if (CAT_EMOTICON_IDS.includes(trimmed)) return trimmed;
+  }
   return 'cat_note';
 }
 
@@ -830,7 +871,10 @@ const COLOR_GUIDE_PROMPT = `3. "suggestedColor": scegli ESATTAMENTE uno di quest
    - "red": (-2 malissimo ad alta carica — Rosso) umore pessimo con emotività negativa intensa, rabbia, irritazione, agitazione, troppo stress, forte ansia o frustrazione marcata.
    - "anthracite": (-2 malissimo a bassa energia — Antracita) apatia profonda, assenza di sentimenti, distacco emotivo, visione negativa e grigia, energia mentale estremamente scarica o senso di vuoto.`;
 
-const REMINDERS_GUIDE_PROMPT = `4. "reminders": cerca nel testo eventuali cose importanti da ricordare, intenzioni pratiche, idee d'azione o ipotesi su cosa fare/dire/pensare (ad esempio frasi con "potrei fare...", "forse dovrei...", "mi sa che se faccio/dico/penso...", "devo ricordarmi...", "sarebbe meglio se...", "bisogna che...", "magari...", "domani provo...", "non devo dimenticare..."). Riporta l'INTERA frase o le INTERE frasi originali complete così come dette, senza riassumerle né tagliarle. Se non ci sono frasi di questo tipo o se transcript è "[SILENZIO]", restituisci [].`;
+const REMINDERS_GUIDE_PROMPT = `4. "reminders": cerca nel testo:
+   - eventuali cose importanti da ricordare, intenzioni pratiche, cose che l'utente dice di dover fare, idee d'azione o ipotesi (es. "potrei fare...", "forse dovrei...", "mi sa che se...", "devo ricordarmi...", "devo fare...", "sarebbe meglio se...", "bisogna che...", "magari...", "domani provo...", "non devo dimenticare...").
+   - DOMANDE che l'utente si pone e RIFLESSIONI / POSSIBILI SOLUZIONI che si dà, soprattutto su benessere, focus, concentrazione, stile e modo di vivere, scelte o abitudini (es. qualsiasi domanda con "?", "mi chiedo...", "come posso...", "cosa potrei fare per...", "perché continuo a...", "una soluzione sarebbe...", "potrei provare a...").
+   Riporta l'INTERA frase o domanda originale completa (compreso eventuale punto interrogativo "?") così come detta, senza riassumerla né tagliarla. Se non ci sono frasi o domande di questo tipo o se transcript è "[SILENZIO]", restituisci [].`;
 
 async function transcribeAndSynthesizeWithFailover(
   ai: GoogleGenAI,
@@ -1564,7 +1608,7 @@ export function createApiApp(): express.Express {
                     parts: [
                       { inlineData: { mimeType: cleanMime, data: audioBase64 } },
                       {
-                        text: `Trascrivi fedelmente questa breve nota vocale da fare in italiano e scegli l'ID icona MicioMiao più inerente al significato del testo tra quelli consentiti (es. benzina/gpl -> "cat_fuel", barbiere -> "cat_barber", auto -> "cat_car", treno -> "cat_train", aereo -> "cat_plane", pacchi/posta -> "cat_package", lavatrice/bucato -> "cat_laundry", spazzatura -> "cat_trash", attrezzi/riparazioni -> "cat_repair", piante -> "cat_garden", farmacia/pillole -> "cat_pharmacy", dentista -> "cat_dentist", dottore -> "cat_health", banca/soldi -> "cat_bank", bollette -> "cat_bills", pizza -> "cat_pizza", aperitivo/bevande -> "cat_drink", caffè -> "cat_coffee", pranzo/cena -> "cat_food", spesa -> "cat_shop", email -> "cat_email", chiamate -> "cat_call", computer/pc -> "cat_computer", lavoro -> "cat_work", bici -> "cat_bike", sport -> "cat_sport", foto -> "cat_camera", vestiti -> "cat_clothes", chiavi -> "cat_keys", montagna -> "cat_mountain"). Restituisci SOLO JSON con "text" e "emoji". IMPORTANTE: se nell'audio c'è solo silenzio o rumore di fondo senza parole chiare, restituisci esattamente text="[SILENZIO]" senza inventare nulla.`,
+                        text: `Trascrivi fedelmente questa breve nota vocale da fare in italiano e scegli l'ID icona MicioMiao più inerente al significato del testo tra quelli consentiti (es. benzina/gpl -> "cat_fuel", barbiere -> "cat_barber", auto -> "cat_car", treno -> "cat_train", aereo -> "cat_plane", pacchi/posta -> "cat_package", documenti -> "cat_paperwork", lavatrice/bucato -> "cat_laundry", pulizie/pulisci casa -> "cat_clean", borsa/zaino -> "cat_bag", scarpe -> "cat_shoes", occhiali -> "cat_glasses", sveglia/orario -> "cat_clock", lenzuola/letto -> "cat_bed", spazzatura -> "cat_trash", attrezzi/riparazioni -> "cat_repair", piante -> "cat_garden", farmacia/pillole -> "cat_pharmacy", dentista -> "cat_dentist", dottore -> "cat_health", banca/soldi -> "cat_bank", bollette -> "cat_bills", pizza -> "cat_pizza", aperitivo/bevande -> "cat_drink", acqua -> "cat_water", caffè -> "cat_coffee", cucinare/pentola -> "cat_cook", pranzo/cena -> "cat_food", spesa -> "cat_shop", email -> "cat_email", chiamate -> "cat_call", computer/pc -> "cat_computer", batteria/caricabatterie -> "cat_battery", lavoro -> "cat_work", meditazione/respiro -> "cat_meditate", bici -> "cat_bike", sport -> "cat_sport", foto -> "cat_camera", vestiti -> "cat_clothes", chiavi -> "cat_keys", montagna -> "cat_mountain"). Restituisci SOLO JSON con "text" e "emoji". IMPORTANTE: se nell'audio c'è solo silenzio o rumore di fondo senza parole chiare, restituisci esattamente text="[SILENZIO]" senza inventare nulla.`,
                       },
                     ],
                   },
@@ -1603,10 +1647,7 @@ export function createApiApp(): express.Express {
           recordSuccessfulGeminiUsage();
           return res.json({
             text,
-            emoji:
-              typeof parsed.emoji === 'string' && catEmoticonIds.includes(parsed.emoji.trim())
-                ? parsed.emoji.trim()
-                : inferServerCatIconFallback(text),
+            emoji: reconcileServerCatIcon(parsed.emoji, text),
             traceId,
             quota: getPublicQuotaSnapshot(),
           });
@@ -1730,7 +1771,7 @@ export function createApiApp(): express.Express {
             () =>
               ai.models.generateContent({
                 model: chosen.model,
-                contents: `Associa a ciascuna delle ${fallbackLines.length} righe numerate l'ID icona MicioMiao più inerente al testo (es. benzina/gpl -> "cat_fuel", barber/capelli -> "cat_barber", auto -> "cat_car", treno -> "cat_train", aereo -> "cat_plane", pacchi/posta -> "cat_package", bucato/lavatrice -> "cat_laundry", spazzatura -> "cat_trash", riparazioni/attrezzi -> "cat_repair", piante -> "cat_garden", farmacia -> "cat_pharmacy", dentista -> "cat_dentist", dottore -> "cat_health", banca -> "cat_bank", bollette -> "cat_bills", pizza -> "cat_pizza", drink -> "cat_drink", caffè -> "cat_coffee", cibo -> "cat_food", spesa -> "cat_shop", email -> "cat_email", chiamare -> "cat_call", computer -> "cat_computer", lavoro -> "cat_work", bici -> "cat_bike", sport -> "cat_sport", chiavi -> "cat_keys", vestiti -> "cat_clothes", montagna -> "cat_mountain").
+                contents: `Associa a ciascuna delle ${fallbackLines.length} righe numerate l'ID icona MicioMiao più inerente al testo (es. benzina/gpl -> "cat_fuel", barber/capelli -> "cat_barber", auto -> "cat_car", treno -> "cat_train", aereo -> "cat_plane", pacchi/posta -> "cat_package", documenti -> "cat_paperwork", bucato/lavatrice -> "cat_laundry", pulizie/pulisci casa -> "cat_clean", borsa/zaino -> "cat_bag", scarpe -> "cat_shoes", occhiali -> "cat_glasses", sveglia/orario -> "cat_clock", lenzuola/letto -> "cat_bed", spazzatura -> "cat_trash", riparazioni/attrezzi -> "cat_repair", piante -> "cat_garden", farmacia -> "cat_pharmacy", dentista -> "cat_dentist", dottore -> "cat_health", banca -> "cat_bank", bollette -> "cat_bills", pizza -> "cat_pizza", drink -> "cat_drink", acqua -> "cat_water", caffè -> "cat_coffee", cucinare/pentola -> "cat_cook", cibo -> "cat_food", spesa -> "cat_shop", email -> "cat_email", chiamare -> "cat_call", computer -> "cat_computer", batteria -> "cat_battery", lavoro -> "cat_work", meditazione -> "cat_meditate", bici -> "cat_bike", sport -> "cat_sport", chiavi -> "cat_keys", vestiti -> "cat_clothes", montagna -> "cat_mountain").
 REGOLA ASSOLUTA: ogni riga numerata DEVE restare UNA SOLA nota. Anche se su una stessa riga ci sono più attività (separate da virgole, "e", ";", "/" o trattini), NON dividerle MAI su più note: mantieni tutte le attività di quella riga in una riga sola. Restituisci esattamente un elemento per ogni indice da 0 a ${fallbackLines.length - 1}.
 
 Righe:
@@ -1784,7 +1825,7 @@ ${numberedLines.slice(0, 6000)}
 
           const items = fallbackLines.map((text, idx) => ({
             text,
-            emoji: emojiByIndex.get(idx) || inferServerCatIconFallback(text),
+            emoji: reconcileServerCatIcon(emojiByIndex.get(idx), text),
           }));
 
           recordSuccessfulGeminiUsage();

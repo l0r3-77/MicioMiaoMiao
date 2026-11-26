@@ -1,12 +1,11 @@
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
 
 /**
- * Regex patterns matching Italian action/reminder/intention phrases in spoken or written notes:
- * e.g. "potrei fare...", "forse dovrei...", "mi sa che se faccio/dico/penso...",
- * "devo ricordarmi...", "sarebbe meglio se...", "bisogna che...", "magari...", etc.
+ * Regex patterns matching Italian action/reminder/intention phrases, self-questions,
+ * wellbeing/focus/lifestyle reflections, and proposed solutions in spoken or written notes.
  */
 const REMINDER_TRIGGER_REGEX =
-  /\b(potrei|forse\s+dovrei|forse\s+potrei|dovrei|mi\s+sa\s+che|se\s+(?:faccio|dico|penso|provo|chiedo|chiamo|scrivo|vado|aspetto|lascio|parlo)|devo\s+(?:fare|dire|ricordar|chiamar|scriver|mandar|inviar|parlar|comprar|prenotar|pagar|controllar|fissar|organizzar|finir|mandare)|ricordarmi|da\s+ricordare|non\s+(?:devo\s+)?dimenticar|sarebbe\s+(?:meglio|utile|opportuno|bene)|converrebbe|mi\s+conviene|bisogna\s+che|bisognerebbe|magari\s+(?:faccio|provo|chiamo|scrivo|prendo|cambio|proviamo)|appena\s+posso|la\s+prossima\s+volta|domani\s+(?:faccio|chiamo|scrivo|provo|devo|potrei)|proverò\s+a|devo\s+assolutamente|faccio\s+prima\s+a|meglio\s+se)\b/i;
+  /\b(potrei|forse\s+dovrei|forse\s+potrei|dovrei|mi\s+sa\s+che|se\s+(?:faccio|dico|penso|provo|chiedo|chiamo|scrivo|vado|aspetto|lascio|parlo|cambio|smetto|inizio)|devo\s+(?:fare|dire|ricordar\w*|chiamar\w*|scriver\w*|mandar\w*|inviar\w*|parlar\w*|comprar\w*|prenotar\w*|pagar\w*|controllar\w*|fissar\w*|organizzar\w*|finir\w*|capir\w*|provar\w*|cambiar\w*|riposar\w*|staccar\w*|smetter\w*|iniziar\w*)|ricordarmi|da\s+ricordare|non\s+(?:devo\s+)?dimenticar\w*|sarebbe\s+(?:meglio|utile|opportuno|bene)|converrebbe|mi\s+conviene|bisogna\s+che|bisognerebbe|magari\s+(?:faccio|provo|chiamo|scrivo|prendo|cambio|proviamo)|appena\s+posso|la\s+prossima\s+volta|domani\s+(?:faccio|chiamo|scrivo|provo|devo|potrei)|proverò\s+a|devo\s+assolutamente|faccio\s+prima\s+a|meglio\s+se|mi\s+chiedo\s+(?:se|come|perch[eé]|cosa|quanto)|mi\s+domando|chiss[aà]\s+(?:se|come|perch[eé]|cosa)|come\s+(?:posso|faccio|potrei|fare\s+a)|perch[eé]\s+(?:mi|non|sono|ho|faccio|succede)|cosa\s+(?:posso|potrei|dovrei|mi\s+fa)|che\s+cosa\s+(?:posso|potrei|dovrei|mi)|e\s+se\s+(?:provassi|provo|facessi|faccio|cambiassi|cambio|provassimo)|ha\s+senso|vale\s+la\s+pena|vorrei\s+capire|devo\s+capire|potrei\s+provare|dovrei\s+provare|(?:la\s+|una\s+possibile\s+)?soluzion[ei]\s+(?:[eè]|sarebbe|potrebbe)|un['’]?\s*idea\s+(?:sarebbe|potrebbe|\b[eè]\b)|mi\s+aiuterebbe|mi\s+farebbe\s+bene|per\s+stare\s+meglio|benessere|focus|concentrarmi\s+meglio|modo\s+di\s+vivere|stile\s+di\s+vita|abitudin[ei])\b/i;
 
 export function splitItalianSentences(text: string): string[] {
   if (!text || typeof text !== 'string') return [];
@@ -23,7 +22,8 @@ export function extractRemindersLocally(text: string): string[] {
   const seen = new Set<string>();
 
   for (const sentence of sentences) {
-    if (REMINDER_TRIGGER_REGEX.test(sentence)) {
+    const isExplicitQuestion = sentence.includes('?') && sentence.length >= 8;
+    if (isExplicitQuestion || REMINDER_TRIGGER_REGEX.test(sentence)) {
       const normalized = sentence.toLowerCase();
       if (!seen.has(normalized)) {
         seen.add(normalized);

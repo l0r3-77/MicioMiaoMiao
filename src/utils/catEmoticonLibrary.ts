@@ -23,15 +23,20 @@ export type CatEmoticonId =
   | 'cat_dentist'
   | 'cat_shop'
   | 'cat_food'
+  | 'cat_cook'
   | 'cat_pizza'
   | 'cat_coffee'
+  | 'cat_water'
   | 'cat_drink'
   | 'cat_call'
   | 'cat_email'
   | 'cat_work'
+  | 'cat_paperwork'
   | 'cat_computer'
+  | 'cat_battery'
   | 'cat_book'
   | 'cat_sport'
+  | 'cat_meditate'
   | 'cat_bike'
   | 'cat_music'
   | 'cat_movie'
@@ -39,6 +44,11 @@ export type CatEmoticonId =
   | 'cat_camera'
   | 'cat_gift'
   | 'cat_clothes'
+  | 'cat_bag'
+  | 'cat_shoes'
+  | 'cat_glasses'
+  | 'cat_clock'
+  | 'cat_bed'
   | 'cat_sun'
   | 'cat_mountain'
   | 'cat_baby'
@@ -66,6 +76,27 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     keywords: /\b(appunt|nota|ricord|scriver|elenco|lista|memo)\b/i,
   },
   {
+    id: 'cat_laundry',
+    label: 'Lavatrice & Bucato',
+    accentColor: '#22D3EE',
+    keywords:
+      /\b(lavatric\w*|asciugatric\w*|bucat\w*|panni|stend\w*|stirar\w*|stiro|detersiv\w*|ammorbident\w*|ferro\s+da\s+stiro|lavanderi\w*|centrifug\w*)\b/i,
+  },
+  {
+    id: 'cat_clean',
+    label: 'Pulizie & Riordino',
+    accentColor: '#2DD4BF',
+    keywords:
+      /\b(pulisc\w*|pulir\w*|puliz\w*|pulit\w*|spolver\w*|riordin\w*|spazzar\w*|spazzo\w*|scopa\w*|aspirapolver\w*|piatt\w*|lavastovigli\w*|polvere|sistemar\w*|mocio|igienizz\w*|sanific\w*|vetri|paviment\w*|sgrass\w*)\b/i,
+  },
+  {
+    id: 'cat_bag',
+    label: 'Borsa & Zaino',
+    accentColor: '#F472B6',
+    keywords:
+      /\b(bors[ae]|borsett\w*|zain\w*|tracoll\w*|marsupio|sacca(\s+palestra)?|valigett\w*|tote|trolley)\b/i,
+  },
+  {
     id: 'cat_fuel',
     label: 'Benzina / GPL',
     accentColor: '#FB923C',
@@ -84,7 +115,7 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Auto & Meccanico',
     accentColor: '#60A5FA',
     keywords:
-      /\b(auto|macchin\w*|meccanic\w*|gommist\w*|tagliand\w*|gomme|revisione|lavaggio\s+auto|autolavagg\w*|parchegg\w*|assicuraz\w*|bollo\s+auto|autostrad\w*|guidar\w*)\b/i,
+      /\b(auto|macchin\w*|meccanic\w*|gommist\w*|tagliand\w*|gomme|revisione|lavaggio\s+auto|lavar\w*\s+(l['’]?\s*)?(auto|macchina)|autolavagg\w*|parchegg\w*|assicuraz\w*|bollo\s+auto|autostrad\w*|guidar\w*)\b/i,
   },
   {
     id: 'cat_train',
@@ -98,28 +129,14 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Volo & Viaggi',
     accentColor: '#0EA5E9',
     keywords:
-      /\b(aere\w*|volo|voli|aeroport\w*|imbarc\w*|valigi\w*|viagg\w*|passaport\w*|check-?in|hotel|b&b|partir\w*|bigliett\w*)\b/i,
+      /\b(aere\w*|volo|voli|aeroport\w*|imbarc\w*|valigi\w*|viagg\w*|check-?in|hotel|b&b|partir\w*|bigliett\w*)\b/i,
   },
   {
     id: 'cat_shower',
     label: 'Doccia & Cura',
     accentColor: '#38BDF8',
     keywords:
-      /\b(docci\w*|bagno|shampoo|balsamo|skincare|lavars\w*|lavar\w*\s+(la\s+faccia|le\s+mani)|crema|sapone|viso|maschera\s+viso|depilaz\w*|unghie|estetist\w*|barba\s+doccia)\b/i,
-  },
-  {
-    id: 'cat_clean',
-    label: 'Pulizie & Casa',
-    accentColor: '#2DD4BF',
-    keywords:
-      /\b(pulir\w*|puliz\w*|riordin\w*|spazzar\w*|scopa|aspirapolver\w*|piatt\w*|lavastovigli\w*|polvere|sistemar\w*|mocio|igienizz\w*|vetri|paviment\w*)\b/i,
-  },
-  {
-    id: 'cat_laundry',
-    label: 'Bucato & Lavatrice',
-    accentColor: '#22D3EE',
-    keywords:
-      /\b(lavatr\w*|bucat\w*|panni|stender\w*|stirar\w*|asciugatric\w*|detersiv\w*|ammorbident\w*|ferro\s+da\s+stiro)\b/i,
+      /\b(docci\w*|shampoo|balsamo|skincare|lavars\w*|lavar\w*\s+(la\s+faccia|le\s+mani)|crema|sapone|viso|maschera\s+viso|depilaz\w*|unghie|estetist\w*|barba\s+doccia|bagnoschiuma)\b/i,
   },
   {
     id: 'cat_trash',
@@ -127,6 +144,13 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     accentColor: '#4ADE80',
     keywords:
       /\b(spazzatur\w*|differenziat\w*|immondiz\w*|rifiut\w*|organico|umido|plastica|carta\s+vetro|bidon\w*|buttar\w*\s+(la\s+)?spazzatura|sacchett\w*)\b/i,
+  },
+  {
+    id: 'cat_bed',
+    label: 'Letto & Lenzuola',
+    accentColor: '#818CF8',
+    keywords:
+      /\b(lenzuol\w*|rifar\w*\s+(il\s+)?letto|fedor\w*|copripiumin\w*|materass\w*|cuscin\w*|cambi\w*\s+(le\s+)?lenzuola)\b/i,
   },
   {
     id: 'cat_home',
@@ -140,14 +164,14 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Attrezzi & Riparazioni',
     accentColor: '#F59E0B',
     keywords:
-      /\b(riparaz\w*|aggiustar\w*|idraulic\w*|elettricist\w*|caldaia|ferrament\w*|trapan\w*|martell\w*|cacciavit\w*|bricolage|montar\w*|lavori\s+casa|tecnico)\b/i,
+      /\b(ripar\w*|aggiust\w*|idraulic\w*|elettricist\w*|caldaia|ferrament\w*|trapan\w*|martell\w*|cacciavit\w*|bricolage|montar\w*|lavori\s+casa|tecnico|lampadin\w*)\b/i,
   },
   {
     id: 'cat_garden',
     label: 'Piante & Giardino',
     accentColor: '#22C55E',
     keywords:
-      /\b(giardin\w*|piant\w*|innaffiar\w*|fior\w*|prato|tagliare\s+erba|orto|potar\w*|balcone\s+piante|terriccio|vaso)\b/i,
+      /\b(giardin\w*|piant\w*|innaffi\w*|fior\w*|prato|tagliare\s+erba|orto|potar\w*|balcone\s+piante|terriccio|vaso|vasi)\b/i,
   },
   {
     id: 'cat_package',
@@ -157,18 +181,25 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
       /\b(pacco|pacchi|corriere|posta|poste|ufficio\s+postale|spedizion\w*|consegn\w*|ritirar\w*\s+(il\s+)?pacco|amazon|vinted|reso|raccomandat\w*)\b/i,
   },
   {
+    id: 'cat_paperwork',
+    label: 'Documenti & Pratiche',
+    accentColor: '#64748B',
+    keywords:
+      /\b(document\w*|patente|passaport\w*|carta\s+d['’]identit[aà]|anagrafe|comune|modulo|moduli|pratic[ae]|certificat\w*|spid|cie|firma|firmar\w*)\b/i,
+  },
+  {
     id: 'cat_bills',
     label: 'Bollette & Scadenze',
     accentColor: '#FBBF24',
     keywords:
-      /\b(bollett\w*|luce|enel|acqua|gas\s+casa|affitt\w*|mutuo|fattur\w*|tass\w*|f24|multa|abbonament\w*|spese\s+condominiali|commercialist\w*)\b/i,
+      /\b(bollett\w*|luce|enel|acqua\s+bolletta|gas\s+casa|affitt\w*|mutuo|fattur\w*|tass\w*|f24|multa|abbonament\w*|spese\s+condominiali|commercialist\w*)\b/i,
   },
   {
     id: 'cat_bank',
     label: 'Banca & Soldi',
     accentColor: '#10B981',
     keywords:
-      /\b(banc\w*|bancomat|carta(\s+di\s+credito)?|pagar\w*|pagament\w*|bonific\w*|ricaric\w*|sold\w*|euro|stipend\w*|pos|preliev\w*|portafogli|conto|paypal|satispay)\b/i,
+      /\b(banc\w*|bancomat|carta(\s+di\s+credito)?|pagar\w*|pagament\w*|bonific\w*|ricaric\w*\s+(carta|conto)|sold\w*|euro|stipend\w*|pos|preliev\w*|portafogli|conto|paypal|satispay)\b/i,
   },
   {
     id: 'cat_pet',
@@ -196,21 +227,34 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Dentista & Denti',
     accentColor: '#67E8F9',
     keywords:
-      /\b(dentist\w*|denti|spazzolin\w*|igiene\s+dentale|carie|apparecchio\s+denti|pulizia\s+denti|ortodonz\w*|filo\s+interdentale)\b/i,
+      /\b(dentist\w*|denti|spazzolin\w*|lavar\w*\s+i\s+denti|igiene\s+dentale|carie|apparecchio\s+denti|pulizia\s+denti|ortodonz\w*|filo\s+interdentale)\b/i,
+  },
+  {
+    id: 'cat_glasses',
+    label: 'Occhiali & Vista',
+    accentColor: '#38BDF8',
+    keywords: /\b(occhial\w*|lenti(\s+a\s+contatto)?|ottico|colliri\w*|pulire\s+occhiali)\b/i,
   },
   {
     id: 'cat_shop',
     label: 'Spesa & Carrello',
     accentColor: '#60A5FA',
     keywords:
-      /\b(spes\w*|supermercat\w*|esselunga|conad|coop|lidl|eurospin|carrefour|comprar\w*|acquist\w*|latte|pane|frutta|verdur\w*|negoz\w*|ordinar\w*|carrell\w*|alimentari)\b/i,
+      /\b(spes\w*|supermercat\w*|esselunga|conad|coop|lidl|eurospin|carrefour|compro|compri|compra|comprar\w*|acquist\w*|latte|pane|frutta|verdur\w*|negoz\w*|ordinar\w*|carrell\w*|alimentari)\b/i,
+  },
+  {
+    id: 'cat_cook',
+    label: 'Pentola & Cucinare',
+    accentColor: '#F97316',
+    keywords:
+      /\b(cucin\w*|pentol\w*|padell\w*|soffritto|sugo|bollir\w*|fornell\w*|impast\w*|scolar\w*|preparar\w*\s+(la\s+)?(cena|pranzo|pasta))\b/i,
   },
   {
     id: 'cat_food',
-    label: 'Cucina & Pasti',
+    label: 'Pasti & Ristorante',
     accentColor: '#FB923C',
     keywords:
-      /\b(cibo|cena\w*|pranz\w*|cucin\w*|ricett\w*|past\w*|ristorant\w*|mangiar\w*|forn\w*|sushi|apparecchi\w*|dolce|torta|gelat\w*|preparar\w*\s+da\s+mangiare)\b/i,
+      /\b(cibo|cena\w*|pranz\w*|ricett\w*|past\w*|ristorant\w*|mangiar\w*|forn\w*|sushi|apparecchi\w*|dolce|torta|gelat\w*)\b/i,
   },
   {
     id: 'cat_pizza',
@@ -218,6 +262,13 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     accentColor: '#F97316',
     keywords:
       /\b(pizz\w*|pizzeri\w*|hamburger|burger|kebab|panin\w*|patatine|glovo|deliveroo|just\s*eat|take\s*away|asporto)\b/i,
+  },
+  {
+    id: 'cat_water',
+    label: 'Acqua & Idratazione',
+    accentColor: '#0EA5E9',
+    keywords:
+      /\b(ber[ei]\s+(pi[uù]\s+)?acqua|borraccia|idratazion\w*|idratarm\w*|bottigli\w*\s+d['’]?acqua|bicchier\w*\s+d['’]?acqua|acqua)\b/i,
   },
   {
     id: 'cat_coffee',
@@ -231,14 +282,14 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Aperitivo & Drink',
     accentColor: '#EC4899',
     keywords:
-      /\b(aperitiv\w*|spritz|birr\w*|vino|cocktail|bere|drink|brindis\w*|pub|enotec\w*|locale)\b/i,
+      /\b(aperitiv\w*|spritz|birr\w*|vino|cocktail|drink|brindis\w*|pub|enotec\w*|locale)\b/i,
   },
   {
     id: 'cat_call',
     label: 'Chiamate & Telefono',
     accentColor: '#38BDF8',
     keywords:
-      /\b(chiamar\w*|telefon\w*|whatsapp|sms|risponder\w*|contatt\w*|videochiamat\w*|zoom|call|sentir\w*|messagg\w*)\b/i,
+      /\b(chiam\w*|telefon\w*|whatsapp|sms|rispond\w*|contatt\w*|videochiamat\w*|zoom|call|sentir\w*|messagg\w*)\b/i,
   },
   {
     id: 'cat_email',
@@ -248,18 +299,25 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
       /\b(email|e-mail|mail|pec|inviar\w*(\s+la)?\s+mail|letter\w*|newsletter|posta\s+elettronica|scriver\w*\s+a)\b/i,
   },
   {
+    id: 'cat_battery',
+    label: 'Ricarica & Cavi',
+    accentColor: '#22C55E',
+    keywords:
+      /\b(caric\w*\s+(il\s+)?(telefono|cellulare|iphone|watch|orologio|powerbank|tablet|cuffie|pc)|caricabatteri\w*|powerbank|batteri\w*|cavett\w*|cavo\s+usb)\b/i,
+  },
+  {
     id: 'cat_work',
     label: 'Lavoro & Ufficio',
     accentColor: '#818CF8',
     keywords:
-      /\b(lavor\w*|riunion\w*|ufficio|client\w*|document\w*|cv|curriculum|scrivani\w*|turno|contratt\w*|progett\w*|presentazion\w*|colloqu\w*|smart\s*working|busta\s+paga)\b/i,
+      /\b(lavor\w*|riunion\w*|ufficio|client\w*|cv|curriculum|scrivani\w*|turno|contratt\w*|progett\w*|presentazion\w*|colloqu\w*|smart\s*working|busta\s+paga)\b/i,
   },
   {
     id: 'cat_computer',
     label: 'PC & Tech',
     accentColor: '#3B82F6',
     keywords:
-      /\b(pc|computer|portatil\w*|laptop|stamp\w*|backup|aggiornar\w*|app|software|sito|codice|password|wifi|stampant\w*|caricator\w*|tablet|iphone|smartphone)\b/i,
+      /\b(pc|computer|portatil\w*|laptop|stamp\w*|backup|aggiornar\w*|app|software|sito|codice|password|wifi|stampant\w*|tablet|iphone|smartphone)\b/i,
   },
   {
     id: 'cat_book',
@@ -267,6 +325,13 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     accentColor: '#A78BFA',
     keywords:
       /\b(libr\w*|legger\w*|lettur\w*|stud\w*|esam\w*|cors\w*|ripas\w*|bibliotec\w*|scuol\w*|compit\w*|lezion\w*|tesi|universit\w*|diario)\b/i,
+  },
+  {
+    id: 'cat_meditate',
+    label: 'Respiro & Calma',
+    accentColor: '#2DD4BF',
+    keywords:
+      /\b(medit\w*|mindfulness|respir\w*|calmarm\w*|rilassament\w*|pausa\s+mentale|centrat\w*|silenzio\s+interiore)\b/i,
   },
   {
     id: 'cat_sport',
@@ -318,11 +383,25 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
       /\b(compleann\w*|regal\w*|anniversar\w*|sorpres\w*|fest[ae]\w*|matrimon\w*|invit\w*|party|biglietto\s+auguri|natale)\b/i,
   },
   {
+    id: 'cat_shoes',
+    label: 'Scarpe & Passeggio',
+    accentColor: '#EC4899',
+    keywords:
+      /\b(scarp\w*|sneakers|stival\w*|ciabatt\w*|calzin\w*|stringh\w*|sandal\w*)\b/i,
+  },
+  {
     id: 'cat_clothes',
     label: 'Vestiti & Cambio',
     accentColor: '#E879F9',
     keywords:
-      /\b(vestit\w*|scarp\w*|magli\w*|pantalon\w*|giacc\w*|cappott\w*|camici\w*|armadio|guardarob\w*|zain\w*|borsa|sart\w*|cintur\w*)\b/i,
+      /\b(vestit\w*|magli\w*|pantalon\w*|giacc\w*|cappott\w*|camici\w*|armadio|guardarob\w*|sart\w*|cintur\w*|felp\w*|intimo)\b/i,
+  },
+  {
+    id: 'cat_clock',
+    label: 'Sveglia & Orari',
+    accentColor: '#F59E0B',
+    keywords:
+      /\b(svegli\w*|orologi\w*|puntual\w*|orario|appuntament\w*|sveglia\s+presto|sveglia)\b/i,
   },
   {
     id: 'cat_sun',
@@ -371,7 +450,7 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
     label: 'Riposo & Notte',
     accentColor: '#818CF8',
     keywords:
-      /\b(dormir\w*|sonn\w*|letto|pisolin\w*|serat\w*|relax|ripos\w*|medit\w*|notte|calma|poi\s+poi|divano|pigiam\w*)\b/i,
+      /\b(dormir\w*|sonn\w*|letto|pisolin\w*|serat\w*|relax|ripos\w*|notte|calma|poi\s+poi|divano|pigiam\w*)\b/i,
   },
   {
     id: 'cat_think',
@@ -475,37 +554,51 @@ const LEGACY_EMOJI_TO_CAT: Record<string, CatEmoticonId> = {
   '☀️': 'cat_sun',
 };
 
+/**
+ * High-specificity priority order:
+ * Specific objects/appliances/actions ALWAYS precede generic nouns like casa/lavoro/cibo
+ * (e.g. "lavatrice" -> cat_laundry, "pulisci casa" -> cat_clean, "borsa" -> cat_bag).
+ */
 const INFERENCE_PRIORITY_ORDER: CatEmoticonId[] = [
+  'cat_laundry',
+  'cat_clean',
+  'cat_bag',
   'cat_fuel',
   'cat_barber',
   'cat_package',
-  'cat_laundry',
   'cat_trash',
   'cat_pharmacy',
   'cat_dentist',
+  'cat_glasses',
   'cat_repair',
   'cat_garden',
+  'cat_bed',
   'cat_train',
   'cat_plane',
   'cat_keys',
+  'cat_battery',
+  'cat_shoes',
   'cat_clothes',
+  'cat_paperwork',
   'cat_bank',
   'cat_bills',
   'cat_pizza',
   'cat_drink',
+  'cat_water',
   'cat_coffee',
+  'cat_cook',
   'cat_food',
   'cat_shower',
   'cat_health',
   'cat_pet',
   'cat_car',
-  'cat_clean',
   'cat_shop',
   'cat_email',
   'cat_call',
   'cat_computer',
   'cat_work',
   'cat_book',
+  'cat_meditate',
   'cat_bike',
   'cat_sport',
   'cat_camera',
@@ -513,6 +606,7 @@ const INFERENCE_PRIORITY_ORDER: CatEmoticonId[] = [
   'cat_movie',
   'cat_game',
   'cat_gift',
+  'cat_clock',
   'cat_mountain',
   'cat_sun',
   'cat_baby',
@@ -526,26 +620,92 @@ const INFERENCE_PRIORITY_ORDER: CatEmoticonId[] = [
   'cat_happy',
 ];
 
+const COMPOUND_PHRASE_RULES: Array<{ pattern: RegExp; id: CatEmoticonId }> = [
+  {
+    pattern: /\b(lavatric\w*|asciugatric\w*|bucat\w*|panni\b|stender\w*|stirar\w*)\b/i,
+    id: 'cat_laundry',
+  },
+  {
+    pattern: /\b(lavaggio\s+auto|(pulir\w*|pulisc\w*|lavar\w*)\s+(l['’]?\s*)?(auto|macchina))\b/i,
+    id: 'cat_car',
+  },
+  {
+    pattern: /\b(pulisc\w*|pulir\w*|puliz\w*|spolver\w*|riordin\w*|aspirapolver\w*|mocio|igienizz\w*|sanific\w*|scopar\w*)\b/i,
+    id: 'cat_clean',
+  },
+  {
+    pattern: /\b(bors[ae]|borsett\w*|zain\w*|tracoll\w*|marsupio|sacca(\s+palestra)?|valigett\w*)\b/i,
+    id: 'cat_bag',
+  },
+  {
+    pattern: /\b(lavar\w*\s+i\s+denti|spazzolin\w*|dentist\w*)\b/i,
+    id: 'cat_dentist',
+  },
+  {
+    pattern: /\b(rifar\w*\s+(il\s+)?letto|cambi\w*\s+(le\s+)?lenzuol\w*|lenzuol\w*)\b/i,
+    id: 'cat_bed',
+  },
+  {
+    pattern: /\b(caricar\w*\s+(il\s+)?(telefono|cellulare|iphone|watch|orologio|powerbank|tablet|cuffie)|powerbank|caricabatteri\w*)\b/i,
+    id: 'cat_battery',
+  },
+  {
+    pattern: /\b(ber[ei]\s+(pi[uù]\s+)?acqua|borraccia)\b/i,
+    id: 'cat_water',
+  },
+];
+
 export function isCatEmoticonId(val?: string | null): val is CatEmoticonId {
   return typeof val === 'string' && val in CAT_EMOTICON_MAP;
+}
+
+export function inferSpecificCatEmoticonId(text: string): CatEmoticonId | null {
+  const clean = (text || '').trim();
+  if (!clean) return null;
+
+  for (const rule of COMPOUND_PHRASE_RULES) {
+    if (rule.pattern.test(clean)) {
+      return rule.id;
+    }
+  }
+
+  for (const id of INFERENCE_PRIORITY_ORDER) {
+    if (CAT_EMOTICON_MAP[id].keywords.test(clean)) {
+      return id;
+    }
+  }
+
+  return null;
 }
 
 export function inferCatEmoticonId(
   text: string,
   blockHint?: TodoBlockKey
 ): CatEmoticonId {
-  const clean = (text || '').trim();
-  if (clean) {
-    for (const id of INFERENCE_PRIORITY_ORDER) {
-      if (CAT_EMOTICON_MAP[id].keywords.test(clean)) {
-        return id;
-      }
-    }
-  }
+  const matched = inferSpecificCatEmoticonId(text);
+  if (matched) return matched;
   if (blockHint === 'bollette') return 'cat_bills';
   if (blockHint === 'svaghi') return 'cat_game';
   if (blockHint === 'poi_poi') return 'cat_sleep';
   return 'cat_note';
+}
+
+/**
+ * Used on auto-generated AI results (transcribe-todo / parse-batch-todos):
+ * if the text clearly contains an explicit high-specificity object/phrase keyword
+ * (e.g. lavatrice, pulisci casa, borsa), prefer the exact matched icon over a
+ * looser AI guess, while preserving AI selection when no explicit keyword matched.
+ */
+export function reconcileAutoCatEmoticonId(
+  aiEmoji: string | undefined,
+  text: string,
+  blockHint?: TodoBlockKey
+): CatEmoticonId {
+  const specific = inferSpecificCatEmoticonId(text);
+  if (specific) {
+    return specific;
+  }
+  return resolveCatEmoticonId(aiEmoji, text, blockHint);
 }
 
 export function resolveCatEmoticonId(
@@ -561,3 +721,4 @@ export function resolveCatEmoticonId(
   }
   return inferCatEmoticonId(text, blockHint);
 }
+
