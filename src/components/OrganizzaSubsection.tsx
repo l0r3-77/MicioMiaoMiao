@@ -44,10 +44,13 @@ import {
   readClipboardTextDirect,
 } from '../utils/clipboardHelper';
 import {
-  CAT_EMOTICON_MAP,
+  getCatIconMeta,
   inferCatEmoticonId,
+  learnCatIconAssociation,
   reconcileAutoCatEmoticonId,
+  requestCreateCustomCatIcon,
   resolveCatEmoticonId,
+  shouldCreateCustomNekoIcon,
   type CatEmoticonId,
 } from '../utils/catEmoticonLibrary';
 import {
@@ -86,7 +89,11 @@ interface OrganizzaSubsectionProps {
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddOrganizeItem: (item: OrganizeNoteItem) => void;
   onAddManyOrganizeItems: (items: OrganizeNoteItem[]) => void;
-  onUpdateOrganizeItem: (id: string, patch: Partial<OrganizeNoteItem>) => void;
+  onUpdateOrganizeItem: (
+    id: string,
+    patch: Partial<OrganizeNoteItem>,
+    options?: { skipUndo?: boolean }
+  ) => void;
   onDeleteOrganizeItem: (id: string) => void;
   onMoveOrReorderOrganizeItem: (
     draggedId: string,
@@ -94,7 +101,6 @@ interface OrganizzaSubsectionProps {
     targetPhase: DayPhaseKey,
     targetItemId?: string | null
   ) => void;
-  onMergeOrganizeItems: (sourceId: string, targetId: string) => void;
   onMoveOrganizeStep: (id: string, delta: -1 | 1) => void;
   onPickTodoForOrganize: (
     todo: TodoNoteItem,
@@ -125,7 +131,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   onUpdateOrganizeItem,
   onDeleteOrganizeItem,
   onMoveOrReorderOrganizeItem,
-  onMergeOrganizeItems,
   onMoveOrganizeStep,
   onPickTodoForOrganize,
   onDuplicateOrganizeItem,
@@ -178,14 +183,13 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   const [exportModalDate, setExportModalDate] = useState<string>(todayIso);
   const [exportModalScope, setExportModalScope] = useState<'day' | 'week'>('day');
 
-  // Drag & Drop state (mouse HTML5 + iPhone touch pointer drag): supports Move/Reorder AND Merge
+  // Drag & Drop state (mouse HTML5 + touch pointer drag): supports Move & Reorder (no merge)
   const [draggedOrgId, setDraggedOrgId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     date: string;
     phase: DayPhaseKey;
     insertBeforeId?: string | null;
     insertEnd?: boolean;
-    mergeTargetId?: string | null;
   } | null>(null);
   const pointerDragRef = useRef<{ id: string; active: boolean } | null>(null);
   const dragCursorRef = useRef<{ x: number; y: number } | null>(null);
@@ -263,7 +267,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     const elements = document.elementsFromPoint(x, y);
     let insertBeforeId: string | null = null;
     let insertEndSlot: { date: string; phase: DayPhaseKey } | null = null;
-    let mergeTargetId: string | null = null;
+    let rowItemId: string | null = null;
     let slotDate: string | null = null;
     let slotPhase: DayPhaseKey | null = null;
 
@@ -279,9 +283,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
           if (d && p) insertEndSlot = { date: d, phase: p as DayPhaseKey };
         }
       }
-      if (!mergeTargetId) {
-        const mi = el.getAttribute('data-org-merge-id');
-        if (mi && mi !== draggedId) mergeTargetId = mi;
+      if (!rowItemId) {
+        const ri = el.getAttribute('data-org-item-id');
+        if (ri && ri !== draggedId) rowItemId = ri;
       }
       if (!slotDate || !slotPhase) {
         const d = el.getAttribute('data-org-date');
@@ -292,7 +296,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         }
       }
     }
-    return { insertBeforeId, insertEndSlot, mergeTargetId, slotDate, slotPhase };
+    return { insertBeforeId, insertEndSlot, rowItemId, slotDate, slotPhase };
   };
 
   const applyOrganizeHitToDropTarget = (
@@ -310,11 +314,11 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         phase: hit.insertEndSlot.phase,
         insertEnd: true,
       });
-    } else if (hit.mergeTargetId && hit.slotDate && hit.slotPhase) {
+    } else if (hit.rowItemId && hit.slotDate && hit.slotPhase) {
       setDropTarget({
         date: hit.slotDate,
         phase: hit.slotPhase,
-        mergeTargetId: hit.mergeTargetId,
+        insertBeforeId: hit.rowItemId,
       });
     } else if (hit.slotDate && hit.slotPhase) {
       setDropTarget({ date: hit.slotDate, phase: hit.slotPhase });
@@ -323,13 +327,22 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     }
   };
 
-  // Touch Pointer drag support for iPhone (Move/Reorder + Merge)
+  // Touch Pointer drag support for mobile (Move & Reorder)
   useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       const st = pointerDragRef.current;
       if (!st?.active) return;
       dragCursorRef.current = { x: e.clientX, y: e.clientY };
       const hit = inspectOrganizePoint(e.clientX, e.clientY, st.id);
+      applyOrganizeHitToDropTarget(hit);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const st = pointerDragRef.current;
+      if (!st?.active || e.touches.length === 0) return;
+      const t = e.touches[0];
+      dragCursorRef.current = { x: t.clientX, y: t.clientY };
+      const hit = inspectOrganizePoint(t.clientX, t.clientY, st.id);
       applyOrganizeHitToDropTarget(hit);
     };
 
@@ -341,75 +354,94 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         onMoveOrReorderOrganizeItem(st.id, hit.slotDate, hit.slotPhase, hit.insertBeforeId);
       } else if (hit.insertEndSlot) {
         onMoveOrReorderOrganizeItem(st.id, hit.insertEndSlot.date, hit.insertEndSlot.phase, null);
-      } else if (hit.mergeTargetId) {
-        onMergeOrganizeItems(st.id, hit.mergeTargetId);
+      } else if (hit.rowItemId && hit.slotDate && hit.slotPhase) {
+        onMoveOrReorderOrganizeItem(st.id, hit.slotDate, hit.slotPhase, hit.rowItemId);
       } else if (hit.slotDate && hit.slotPhase) {
         onMoveOrReorderOrganizeItem(st.id, hit.slotDate, hit.slotPhase, null);
       }
       resetOrgDragState();
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    window.addEventListener('pointercancel', handlePointerUp);
+    window.addEventListener('pointermove', handlePointerMove, true);
+    window.addEventListener('touchmove', handleTouchMove, { capture: true, passive: true });
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', handlePointerUp, true);
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-      window.removeEventListener('pointercancel', handlePointerUp);
+      window.removeEventListener('pointermove', handlePointerMove, true);
+      window.removeEventListener('touchmove', handleTouchMove, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', handlePointerUp, true);
     };
-  }, [onMoveOrReorderOrganizeItem, onMergeOrganizeItems]);
+  }, [onMoveOrReorderOrganizeItem]);
 
-  // Continuous edge auto-scroll (touch + desktop HTML5 drag) so notes can move far beyond visible days
+  // Continuous capture-phase edge auto-scroll (touch + desktop HTML5 drag) across inner list & page
   useEffect(() => {
     if (!draggedOrgId) return;
 
     const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
       dragCursorRef.current = { x: e.clientX, y: e.clientY };
     };
-    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('dragover', handleWindowDragOver, true);
 
     let rafId = 0;
     const stepAutoScroll = () => {
       const cursor = dragCursorRef.current;
       const container = scrollContainerRef.current;
-      if (cursor && container) {
-        const rect = container.getBoundingClientRect();
-        const visibleTop = Math.max(rect.top, 60);
-        const visibleBottom = Math.min(rect.bottom, window.innerHeight - 52);
-        const edgeZone = 86;
+      if (cursor) {
+        let anyScrolled = false;
 
-        let scrolledDelta = 0;
-        if (cursor.y > visibleBottom - edgeZone) {
-          const depth = Math.min(1.65, Math.max(0.25, (cursor.y - (visibleBottom - edgeZone)) / edgeZone));
-          const speed = Math.round(5 + depth * 12);
-          const prevScroll = container.scrollTop;
-          container.scrollTop += speed;
-          scrolledDelta = container.scrollTop - prevScroll;
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          const visibleTop = Math.max(rect.top, 64);
+          const visibleBottom = Math.min(rect.bottom, window.innerHeight - 104);
+          const edgeZone = 90;
 
-          if (rect.bottom > window.innerHeight - 28) {
-            window.scrollBy(0, Math.min(speed, rect.bottom - (window.innerHeight - 28)));
+          if (cursor.y > visibleBottom - edgeZone) {
+            const depth = Math.min(1.75, Math.max(0.25, (cursor.y - (visibleBottom - edgeZone)) / edgeZone));
+            const speed = Math.round(5 + depth * 12);
+            const prevScroll = container.scrollTop;
+            container.scrollTop += speed;
+            if (container.scrollTop !== prevScroll) anyScrolled = true;
+
+            if (rect.bottom > window.innerHeight - 48) {
+              const prevWin = window.scrollY;
+              window.scrollBy(0, Math.min(speed, rect.bottom - (window.innerHeight - 48)));
+              if (window.scrollY !== prevWin) anyScrolled = true;
+            }
+
+            if (
+              container.scrollTop + container.clientHeight >= container.scrollHeight - 220 &&
+              Date.now() - lastAutoExpandAtRef.current > 450
+            ) {
+              lastAutoExpandAtRef.current = Date.now();
+              setTotalDaysCount((c) => c + 7);
+            }
+          } else if (cursor.y < visibleTop + edgeZone) {
+            const depth = Math.min(1.75, Math.max(0.25, ((visibleTop + edgeZone) - cursor.y) / edgeZone));
+            const speed = Math.round(5 + depth * 12);
+            const prevScroll = container.scrollTop;
+            container.scrollTop -= speed;
+            if (container.scrollTop !== prevScroll) anyScrolled = true;
+
+            if (rect.top < 72) {
+              const prevWin = window.scrollY;
+              window.scrollBy(0, -speed);
+              if (window.scrollY !== prevWin) anyScrolled = true;
+            }
           }
-
-          if (
-            container.scrollTop + container.clientHeight >= container.scrollHeight - 220 &&
-            Date.now() - lastAutoExpandAtRef.current > 450
-          ) {
-            lastAutoExpandAtRef.current = Date.now();
-            setTotalDaysCount((c) => c + 7);
-          }
-        } else if (cursor.y < visibleTop + edgeZone) {
-          const depth = Math.min(1.65, Math.max(0.25, ((visibleTop + edgeZone) - cursor.y) / edgeZone));
-          const speed = Math.round(5 + depth * 12);
-          const prevScroll = container.scrollTop;
-          container.scrollTop -= speed;
-          scrolledDelta = container.scrollTop - prevScroll;
-
-          if (rect.top < 64 && container.scrollTop <= 2) {
-            window.scrollBy(0, -speed);
+        } else {
+          // Fallback page scroll
+          if (cursor.y < 104) {
+            window.scrollBy(0, -10);
+            anyScrolled = true;
+          } else if (cursor.y > window.innerHeight - 120) {
+            window.scrollBy(0, 10);
+            anyScrolled = true;
           }
         }
 
-        if (scrolledDelta !== 0 && pointerDragRef.current?.active) {
+        if (anyScrolled && pointerDragRef.current?.active) {
           const hit = inspectOrganizePoint(cursor.x, cursor.y, draggedOrgId);
           applyOrganizeHitToDropTarget(hit);
         }
@@ -419,7 +451,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
 
     rafId = window.requestAnimationFrame(stepAutoScroll);
     return () => {
-      window.removeEventListener('dragover', handleWindowDragOver);
+      window.removeEventListener('dragover', handleWindowDragOver, true);
       window.cancelAnimationFrame(rafId);
     };
   }, [draggedOrgId]);
@@ -452,6 +484,24 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
 
   const effectiveNewCat: CatEmoticonId = manualNewCat ?? inferCatEmoticonId(newModalText);
 
+  const triggerCustomIconIfNeeded = (
+    itemId: string,
+    text: string,
+    chosenCat: CatEmoticonId,
+    wasManual: boolean
+  ) => {
+    if (wasManual || chosenCat !== 'cat_note' || !shouldCreateCustomNekoIcon(text)) return;
+    void requestCreateCustomCatIcon(text).then((created) => {
+      if (created) {
+        onUpdateOrganizeItem(
+          itemId,
+          { emoji: created.id, updatedAt: new Date().toISOString() },
+          { skipUndo: true }
+        );
+      }
+    });
+  };
+
   const handleSaveWrittenNewNote = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newModalText.trim();
@@ -460,9 +510,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       return;
     }
     const nowIso = new Date().toISOString();
+    const wasManual = manualNewCat !== null;
     const chosenCat = manualNewCat ?? inferCatEmoticonId(trimmed);
+    if (wasManual && manualNewCat) {
+      learnCatIconAssociation(trimmed, manualNewCat);
+    }
+    const itemId = crypto.randomUUID();
     const item: OrganizeNoteItem = {
-      id: crypto.randomUUID(),
+      id: itemId,
       date: newModalDate,
       phase: newModalPhase,
       text: trimmed,
@@ -477,6 +532,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       updatedAt: nowIso,
     };
     onAddOrganizeItem(item);
+    triggerCustomIconIfNeeded(itemId, trimmed, chosenCat, wasManual);
     setNewModalOpen(false);
     onNotify(
       `Nota aggiunta (${formatItalianDateShort(newModalDate)} · ${DAY_PHASE_MAP[newModalPhase].title})`
@@ -520,14 +576,19 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
 
       const cleanText = data.text.trim();
       const nowIso = new Date().toISOString();
+      const wasManual = manualNewCat !== null;
       const chosenCat =
         manualNewCat ??
         reconcileAutoCatEmoticonId(
           typeof data.emoji === 'string' ? data.emoji.trim() : undefined,
           cleanText
         );
+      if (wasManual && manualNewCat) {
+        learnCatIconAssociation(cleanText, manualNewCat);
+      }
+      const itemId = crypto.randomUUID();
       const item: OrganizeNoteItem = {
-        id: crypto.randomUUID(),
+        id: itemId,
         date: newModalDate,
         phase: newModalPhase,
         text: cleanText,
@@ -542,6 +603,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
         updatedAt: nowIso,
       };
       onAddOrganizeItem(item);
+      triggerCustomIconIfNeeded(itemId, cleanText, chosenCat, wasManual);
       setNewModalOpen(false);
       onNotify(
         `Nota trascritta (${formatItalianDateShort(newModalDate)} · ${DAY_PHASE_MAP[newModalPhase].title})`
@@ -657,6 +719,23 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       }));
 
       onAddManyOrganizeItems(created);
+      const genericCreated = created
+        .filter((it) => it.emoji === 'cat_note' && shouldCreateCustomNekoIcon(it.text))
+        .slice(0, 4);
+      if (genericCreated.length > 0) {
+        void (async () => {
+          for (const g of genericCreated) {
+            const custom = await requestCreateCustomCatIcon(g.text);
+            if (custom) {
+              onUpdateOrganizeItem(
+                g.id,
+                { emoji: custom.id, updatedAt: new Date().toISOString() },
+                { skipUndo: true }
+              );
+            }
+          }
+        })();
+      }
       onNotify(
         `${created.length} ${created.length === 1 ? 'nota aggiunta' : 'note aggiunte'} (${formatItalianDateShort(
           pasteDate
@@ -889,11 +968,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                         draggedOrgId || e.dataTransfer.getData('text/plain');
                       if (sourceId) {
                         if (
-                          dropTarget?.mergeTargetId &&
-                          dropTarget.mergeTargetId !== sourceId
-                        ) {
-                          onMergeOrganizeItems(sourceId, dropTarget.mergeTargetId);
-                        } else if (
                           dropTarget?.insertBeforeId &&
                           dropTarget.insertBeforeId !== sourceId
                         ) {
@@ -1000,10 +1074,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                   draggedOrgId !== null &&
                                   draggedOrgId !== item.id &&
                                   dropTarget?.insertBeforeId === item.id;
-                                const isMergeTarget =
-                                  draggedOrgId !== null &&
-                                  draggedOrgId !== item.id &&
-                                  dropTarget?.mergeTargetId === item.id;
                                 const catId = resolveCatEmoticonId(item.emoji, item.text);
                                 const hasReminder = Boolean(item.reminderDate && item.reminderTime);
                                 const remShort = hasReminder
@@ -1054,11 +1124,12 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                     )}
 
                                     <div
-                                      data-org-merge-id={item.id}
+                                      data-org-item-id={item.id}
                                       data-org-date={isoDate}
                                       data-org-phase={phase.key}
                                       draggable
                                       onDragStart={(e) => {
+                                        dragCursorRef.current = { x: e.clientX, y: e.clientY };
                                         setDraggedOrgId(item.id);
                                         e.dataTransfer.effectAllowed = 'move';
                                         e.dataTransfer.setData('text/plain', item.id);
@@ -1067,10 +1138,11 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                         if (!draggedOrgId || draggedOrgId === item.id) return;
                                         e.preventDefault();
                                         e.stopPropagation();
+                                        dragCursorRef.current = { x: e.clientX, y: e.clientY };
                                         setDropTarget({
                                           date: isoDate,
                                           phase: phase.key,
-                                          mergeTargetId: item.id,
+                                          insertBeforeId: item.id,
                                         });
                                       }}
                                       onDrop={(e) => {
@@ -1080,16 +1152,19 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                         const sourceId =
                                           draggedOrgId || e.dataTransfer.getData('text/plain');
                                         if (sourceId && sourceId !== item.id) {
-                                          onMergeOrganizeItems(sourceId, item.id);
+                                          onMoveOrReorderOrganizeItem(
+                                            sourceId,
+                                            isoDate,
+                                            phase.key,
+                                            item.id
+                                          );
                                         }
                                         resetOrgDragState();
                                       }}
                                       onDragEnd={resetOrgDragState}
-                                      className={`flex items-start gap-1 rounded-md border px-1 py-[3px] transition-all ${
-                                        isMergeTarget
-                                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-1 ring-[var(--todo-accent)]'
-                                          : 'border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)]'
-                                      } ${isDragged ? 'opacity-45' : ''}`}
+                                      className={`flex items-start gap-1 rounded-md border px-1 py-[3px] transition-all border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)] ${
+                                        isDragged ? 'opacity-45' : ''
+                                      }`}
                                     >
                                       <button
                                         type="button"
@@ -1288,7 +1363,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                             if (
                               dropTarget?.date !== isoDate ||
                               dropTarget?.phase !== phase.key ||
-                              dropTarget?.mergeTargetId ||
                               dropTarget?.insertBeforeId
                             ) {
                               setDropTarget({ date: isoDate, phase: phase.key });
@@ -1301,11 +1375,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                               draggedOrgId || e.dataTransfer.getData('text/plain');
                             if (sourceId) {
                               if (
-                                dropTarget?.mergeTargetId &&
-                                dropTarget.mergeTargetId !== sourceId
-                              ) {
-                                onMergeOrganizeItems(sourceId, dropTarget.mergeTargetId);
-                              } else if (
                                 dropTarget?.insertBeforeId &&
                                 dropTarget.insertBeforeId !== sourceId
                               ) {
@@ -1362,10 +1431,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                   draggedOrgId !== null &&
                                   draggedOrgId !== item.id &&
                                   dropTarget?.insertBeforeId === item.id;
-                                const isMergeTarget =
-                                  draggedOrgId !== null &&
-                                  draggedOrgId !== item.id &&
-                                  dropTarget?.mergeTargetId === item.id;
                                 const catId = resolveCatEmoticonId(item.emoji, item.text);
                                 const hasReminder = Boolean(item.reminderDate && item.reminderTime);
                                 const remShort = hasReminder
@@ -1416,11 +1481,12 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                     )}
 
                                     <div
-                                      data-org-merge-id={item.id}
+                                      data-org-item-id={item.id}
                                       data-org-date={isoDate}
                                       data-org-phase={phase.key}
                                       draggable
                                       onDragStart={(e) => {
+                                        dragCursorRef.current = { x: e.clientX, y: e.clientY };
                                         setDraggedOrgId(item.id);
                                         e.dataTransfer.effectAllowed = 'move';
                                         e.dataTransfer.setData('text/plain', item.id);
@@ -1429,10 +1495,11 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                         if (!draggedOrgId || draggedOrgId === item.id) return;
                                         e.preventDefault();
                                         e.stopPropagation();
+                                        dragCursorRef.current = { x: e.clientX, y: e.clientY };
                                         setDropTarget({
                                           date: isoDate,
                                           phase: phase.key,
-                                          mergeTargetId: item.id,
+                                          insertBeforeId: item.id,
                                         });
                                       }}
                                       onDrop={(e) => {
@@ -1442,16 +1509,19 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                         const sourceId =
                                           draggedOrgId || e.dataTransfer.getData('text/plain');
                                         if (sourceId && sourceId !== item.id) {
-                                          onMergeOrganizeItems(sourceId, item.id);
+                                          onMoveOrReorderOrganizeItem(
+                                            sourceId,
+                                            isoDate,
+                                            phase.key,
+                                            item.id
+                                          );
                                         }
                                         resetOrgDragState();
                                       }}
                                       onDragEnd={resetOrgDragState}
-                                      className={`flex items-center gap-1.5 rounded-lg border px-2 py-[6px] min-h-[34px] transition-all ${
-                                        isMergeTarget
-                                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-2 ring-[var(--todo-accent)]'
-                                          : 'border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)]'
-                                      } ${isDragged ? 'opacity-45' : ''}`}
+                                      className={`flex items-center gap-1.5 rounded-lg border px-2 py-[6px] min-h-[34px] transition-all border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)] ${
+                                        isDragged ? 'opacity-45' : ''
+                                      }`}
                                     >
                                       <button
                                         type="button"
@@ -1546,12 +1616,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                       >
                                         <CopyPlus className="h-3.5 w-3.5" aria-hidden="true" />
                                       </button>
-
-                                      {isMergeTarget && (
-                                        <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
-                                          Unisci
-                                        </span>
-                                      )}
                                     </div>
                                   </React.Fragment>
                                 );
@@ -1674,7 +1738,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     }`}
                   >
                     <CatEmoticonIcon emoticonId={effectiveNewCat} variant="fullFace" sizeClass="h-4 w-4" />
-                    <span>{CAT_EMOTICON_MAP[effectiveNewCat].label}</span>
+                    <span>{getCatIconMeta(effectiveNewCat).label}</span>
                   </button>
                 )}
               </div>
@@ -1692,6 +1756,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
               <CatEmoticonPicker
                 value={effectiveNewCat}
                 isAuto={manualNewCat === null}
+                contextText={newModalText}
                 onSelect={(id) => {
                   setManualNewCat(id);
                   setShowNewCatPicker(false);
@@ -2016,13 +2081,16 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             {showEditCatPicker && (
               <CatEmoticonPicker
                 value={resolveCatEmoticonId(selectedOrgItem.emoji, selectedOrgItem.text)}
+                contextText={editDraftText.trim() || selectedOrgItem.text}
                 onSelect={(catId) => {
+                  const targetText = editDraftText.trim() || selectedOrgItem.text;
+                  learnCatIconAssociation(targetText, catId);
                   onUpdateOrganizeItem(selectedOrgItem.id, {
                     emoji: catId,
                     updatedAt: new Date().toISOString(),
                   });
                   setShowEditCatPicker(false);
-                  onNotify(`Emoticon «${CAT_EMOTICON_MAP[catId].label}» applicata`);
+                  onNotify(`Emoticon «${getCatIconMeta(catId).label}» applicata e imparata`);
                 }}
               />
             )}
@@ -2443,13 +2511,11 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       {/* Floating Drag Guidance Pill */}
       {draggedOrgId && (
         <div className="fixed bottom-16 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none rounded-full bg-[var(--todo-accent-dark)] px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg border border-[var(--todo-shell-border)] whitespace-nowrap max-w-[92vw] truncate">
-          {dropTarget?.mergeTargetId
-            ? `Rilascia per unire con «${organizeItems.find((o) => o.id === dropTarget.mergeTargetId)?.text || 'nota'}»`
-            : dropTarget?.insertBeforeId || dropTarget?.insertEnd
-              ? 'Rilascia per spostare qui'
-              : dropTarget
-                ? `Rilascia in ${formatItalianDateShort(dropTarget.date)} · ${DAY_PHASE_MAP[dropTarget.phase].title}`
-                : 'Trascina su una nota per unirla, o tra le righe per spostarla'}
+          {dropTarget?.insertBeforeId || dropTarget?.insertEnd
+            ? 'Rilascia per spostare qui'
+            : dropTarget
+              ? `Rilascia in ${formatItalianDateShort(dropTarget.date)} · ${DAY_PHASE_MAP[dropTarget.phase].title}`
+              : 'Trascina in un’altra fase, riga o giornata per spostare'}
         </div>
       )}
     </div>

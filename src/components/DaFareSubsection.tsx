@@ -40,10 +40,13 @@ import {
   readClipboardTextDirect,
 } from '../utils/clipboardHelper';
 import {
-  CAT_EMOTICON_MAP,
+  getCatIconMeta,
   inferCatEmoticonId,
+  learnCatIconAssociation,
   reconcileAutoCatEmoticonId,
+  requestCreateCustomCatIcon,
   resolveCatEmoticonId,
+  shouldCreateCustomNekoIcon,
   type CatEmoticonId,
 } from '../utils/catEmoticonLibrary';
 import { formatDuration, toISODate } from '../utils/dateUtils';
@@ -67,14 +70,17 @@ interface DaFareSubsectionProps {
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddTodo: (item: TodoNoteItem) => void;
   onAddManyTodos: (items: TodoNoteItem[]) => void;
-  onUpdateTodo: (id: string, patch: Partial<TodoNoteItem>) => void;
+  onUpdateTodo: (
+    id: string,
+    patch: Partial<TodoNoteItem>,
+    options?: { skipUndo?: boolean }
+  ) => void;
   onDeleteTodo: (id: string) => void;
   onMoveOrReorderTodo: (
     draggedId: string,
     targetBlock: TodoBlockKey,
     targetItemId?: string | null
   ) => void;
-  onMergeTodos: (sourceId: string, targetId: string) => void;
   onMoveTodoStep: (id: string, delta: -1 | 1) => void;
   onSendTodoToOrganize: (
     todo: TodoNoteItem,
@@ -102,7 +108,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   onUpdateTodo,
   onDeleteTodo,
   onMoveOrReorderTodo,
-  onMergeTodos,
   onMoveTodoStep,
   onSendTodoToOrganize,
   onDuplicateTodoToOrganize,
@@ -136,13 +141,13 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   const [dupDate, setDupDate] = useState(() => toISODate(new Date()));
   const [dupPhase, setDupPhase] = useState<DayPhaseKey>('mattina');
 
-  // Drag & Drop state (Desktop HTML5 + Touch Pointer): supports Move/Reorder AND Merge
+  // Drag & Drop state (Desktop HTML5 + Touch Pointer): supports Move & Reorder (no merge)
   const [draggedTodoId, setDraggedTodoId] = useState<string | null>(null);
   const [dragOverBlock, setDragOverBlock] = useState<TodoBlockKey | null>(null);
   const [dragInsertBeforeId, setDragInsertBeforeId] = useState<string | null>(null);
   const [dragInsertEndBlock, setDragInsertEndBlock] = useState<TodoBlockKey | null>(null);
-  const [dragMergeTargetId, setDragMergeTargetId] = useState<string | null>(null);
   const pointerDragRef = useRef<{ id: string; active: boolean } | null>(null);
+  const dragCursorRef = useRef<{ x: number; y: number } | null>(null);
 
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textInputRef = useRef<HTMLInputElement | null>(null);
@@ -191,93 +196,148 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
 
   const resetDragState = () => {
     pointerDragRef.current = null;
+    dragCursorRef.current = null;
     setDraggedTodoId(null);
     setDragOverBlock(null);
     setDragInsertBeforeId(null);
     setDragInsertEndBlock(null);
-    setDragMergeTargetId(null);
   };
 
-  // Global touch/pointer drag listeners for iPhone touch drag-and-drop (Move/Reorder + Merge)
-  useEffect(() => {
-    const inspectPoint = (x: number, y: number, draggedId: string) => {
-      const elements = document.elementsFromPoint(x, y);
-      let insertBefore: string | null = null;
-      let insertEnd: TodoBlockKey | null = null;
-      let mergeId: string | null = null;
-      let blockKey: TodoBlockKey | null = null;
+  const inspectTodoPoint = (x: number, y: number, draggedId: string) => {
+    const elements = document.elementsFromPoint(x, y);
+    let insertBefore: string | null = null;
+    let insertEnd: TodoBlockKey | null = null;
+    let rowItemId: string | null = null;
+    let blockKey: TodoBlockKey | null = null;
 
-      for (const el of elements) {
-        if (!insertBefore) {
-          const ib = el.getAttribute('data-todo-insert-before');
-          if (ib && ib !== draggedId) insertBefore = ib;
-        }
-        if (!insertEnd) {
-          const ie = el.getAttribute('data-todo-insert-end') as TodoBlockKey | null;
-          if (ie) insertEnd = ie;
-        }
-        if (!mergeId) {
-          const mi = el.getAttribute('data-todo-merge-id');
-          if (mi && mi !== draggedId) mergeId = mi;
-        }
-        if (!blockKey) {
-          const bk = el.getAttribute('data-todo-block') as TodoBlockKey | null;
-          if (bk) blockKey = bk;
-        }
+    for (const el of elements) {
+      if (!insertBefore) {
+        const ib = el.getAttribute('data-todo-insert-before');
+        if (ib && ib !== draggedId) insertBefore = ib;
       }
-      return { insertBefore, insertEnd, mergeId, blockKey };
-    };
+      if (!insertEnd) {
+        const ie = el.getAttribute('data-todo-insert-end') as TodoBlockKey | null;
+        if (ie) insertEnd = ie;
+      }
+      if (!rowItemId) {
+        const ri = el.getAttribute('data-todo-item-id');
+        if (ri && ri !== draggedId) rowItemId = ri;
+      }
+      if (!blockKey) {
+        const bk = el.getAttribute('data-todo-block') as TodoBlockKey | null;
+        if (bk) blockKey = bk;
+      }
+    }
+    return { insertBefore, insertEnd, rowItemId, blockKey };
+  };
 
+  const applyTodoHit = (hit: ReturnType<typeof inspectTodoPoint>) => {
+    setDragOverBlock(hit.blockKey);
+    if (hit.insertBefore) {
+      setDragInsertBeforeId(hit.insertBefore);
+      setDragInsertEndBlock(null);
+    } else if (hit.insertEnd) {
+      setDragInsertBeforeId(null);
+      setDragInsertEndBlock(hit.insertEnd);
+    } else if (hit.rowItemId) {
+      setDragInsertBeforeId(hit.rowItemId);
+      setDragInsertEndBlock(null);
+    } else {
+      setDragInsertBeforeId(null);
+      setDragInsertEndBlock(null);
+    }
+  };
+
+  // Global touch/pointer drag listeners for mobile touch drag-and-drop (Move & Reorder)
+  useEffect(() => {
     const handlePointerMove = (e: PointerEvent) => {
       const state = pointerDragRef.current;
       if (!state?.active) return;
-      const hit = inspectPoint(e.clientX, e.clientY, state.id);
-      setDragOverBlock(hit.blockKey);
-      if (hit.insertBefore) {
-        setDragInsertBeforeId(hit.insertBefore);
-        setDragInsertEndBlock(null);
-        setDragMergeTargetId(null);
-      } else if (hit.insertEnd) {
-        setDragInsertBeforeId(null);
-        setDragInsertEndBlock(hit.insertEnd);
-        setDragMergeTargetId(null);
-      } else if (hit.mergeId) {
-        setDragInsertBeforeId(null);
-        setDragInsertEndBlock(null);
-        setDragMergeTargetId(hit.mergeId);
-      } else {
-        setDragInsertBeforeId(null);
-        setDragInsertEndBlock(null);
-        setDragMergeTargetId(null);
-      }
+      dragCursorRef.current = { x: e.clientX, y: e.clientY };
+      applyTodoHit(inspectTodoPoint(e.clientX, e.clientY, state.id));
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const state = pointerDragRef.current;
+      if (!state?.active || e.touches.length === 0) return;
+      const t = e.touches[0];
+      dragCursorRef.current = { x: t.clientX, y: t.clientY };
+      applyTodoHit(inspectTodoPoint(t.clientX, t.clientY, state.id));
     };
 
     const handlePointerUp = (e: PointerEvent) => {
       const state = pointerDragRef.current;
       if (!state?.active) return;
-      const hit = inspectPoint(e.clientX, e.clientY, state.id);
+      const hit = inspectTodoPoint(e.clientX, e.clientY, state.id);
 
       if (hit.insertBefore && hit.blockKey) {
         onMoveOrReorderTodo(state.id, hit.blockKey, hit.insertBefore);
       } else if (hit.insertEnd) {
         onMoveOrReorderTodo(state.id, hit.insertEnd, null);
-      } else if (hit.mergeId) {
-        onMergeTodos(state.id, hit.mergeId);
+      } else if (hit.rowItemId && hit.blockKey) {
+        onMoveOrReorderTodo(state.id, hit.blockKey, hit.rowItemId);
       } else if (hit.blockKey) {
         onMoveOrReorderTodo(state.id, hit.blockKey, null);
       }
       resetDragState();
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    window.addEventListener('pointercancel', handlePointerUp);
+    window.addEventListener('pointermove', handlePointerMove, true);
+    window.addEventListener('touchmove', handleTouchMove, { capture: true, passive: true });
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', handlePointerUp, true);
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-      window.removeEventListener('pointercancel', handlePointerUp);
+      window.removeEventListener('pointermove', handlePointerMove, true);
+      window.removeEventListener('touchmove', handleTouchMove, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', handlePointerUp, true);
     };
-  }, [onMoveOrReorderTodo, onMergeTodos]);
+  }, [onMoveOrReorderTodo]);
+
+  // Capture-phase vertical edge auto-scroll during drag (Desktop HTML5 + Touch)
+  useEffect(() => {
+    if (!draggedTodoId) return;
+
+    const handleWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      dragCursorRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener('dragover', handleWindowDragOver, true);
+
+    let rafId = 0;
+    const stepAutoScroll = () => {
+      const cursor = dragCursorRef.current;
+      if (cursor) {
+        const topThreshold = 104;
+        const bottomThreshold = window.innerHeight - 120;
+        let deltaY = 0;
+
+        if (cursor.y < topThreshold) {
+          const depth = Math.min(1.8, Math.max(0.25, (topThreshold - cursor.y) / topThreshold));
+          deltaY = -Math.round(5 + depth * 13);
+        } else if (cursor.y > bottomThreshold) {
+          const zone = Math.max(70, window.innerHeight - bottomThreshold);
+          const depth = Math.min(1.8, Math.max(0.25, (cursor.y - bottomThreshold) / zone));
+          deltaY = Math.round(5 + depth * 13);
+        }
+
+        if (deltaY !== 0) {
+          const prevY = window.scrollY;
+          window.scrollBy(0, deltaY);
+          if (window.scrollY !== prevY && pointerDragRef.current?.active) {
+            applyTodoHit(inspectTodoPoint(cursor.x, cursor.y, draggedTodoId));
+          }
+        }
+      }
+      rafId = window.requestAnimationFrame(stepAutoScroll);
+    };
+
+    rafId = window.requestAnimationFrame(stepAutoScroll);
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver, true);
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [draggedTodoId]);
 
   const nextOrderForBlock = (block: TodoBlockKey): number => {
     const list = itemsByBlock[block];
@@ -288,6 +348,31 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   const effectiveComposerCat: CatEmoticonId =
     manualCatEmoticon ?? inferCatEmoticonId(composerText, composerBlock);
 
+  const triggerCustomIconIfNeeded = (
+    itemId: string,
+    text: string,
+    chosenCat: CatEmoticonId,
+    wasManual: boolean
+  ) => {
+    if (wasManual) return;
+    const isGeneric =
+      chosenCat === 'cat_note' ||
+      chosenCat === 'cat_bills' ||
+      chosenCat === 'cat_game' ||
+      chosenCat === 'cat_sleep';
+    if (!isGeneric || !shouldCreateCustomNekoIcon(text)) return;
+
+    void requestCreateCustomCatIcon(text).then((created) => {
+      if (created) {
+        onUpdateTodo(
+          itemId,
+          { emoji: created.id, updatedAt: new Date().toISOString() },
+          { skipUndo: true }
+        );
+      }
+    });
+  };
+
   const handleAddWrittenTodo = (e: React.FormEvent) => {
     e.preventDefault();
     setComposerError(null);
@@ -297,9 +382,14 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       return;
     }
     const nowIso = new Date().toISOString();
+    const wasManual = manualCatEmoticon !== null;
     const chosenCat = manualCatEmoticon ?? inferCatEmoticonId(trimmed, composerBlock);
+    if (wasManual && manualCatEmoticon) {
+      learnCatIconAssociation(trimmed, manualCatEmoticon);
+    }
+    const itemId = crypto.randomUUID();
     const newItem: TodoNoteItem = {
-      id: crypto.randomUUID(),
+      id: itemId,
       block: composerBlock,
       text: trimmed,
       emoji: chosenCat,
@@ -311,6 +401,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       updatedAt: nowIso,
     };
     onAddTodo(newItem);
+    triggerCustomIconIfNeeded(itemId, trimmed, chosenCat, wasManual);
     setComposerText('');
     setManualCatEmoticon(null);
     setShowComposerCatPicker(false);
@@ -353,6 +444,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
 
       const cleanText = data.text.trim();
       const nowIso = new Date().toISOString();
+      const wasManual = manualCatEmoticon !== null;
       const chosenCat =
         manualCatEmoticon ??
         reconcileAutoCatEmoticonId(
@@ -360,8 +452,12 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           cleanText,
           composerBlock
         );
+      if (wasManual && manualCatEmoticon) {
+        learnCatIconAssociation(cleanText, manualCatEmoticon);
+      }
+      const itemId = crypto.randomUUID();
       const newItem: TodoNoteItem = {
-        id: crypto.randomUUID(),
+        id: itemId,
         block: composerBlock,
         text: cleanText,
         emoji: chosenCat,
@@ -373,6 +469,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
         updatedAt: nowIso,
       };
       onAddTodo(newItem);
+      triggerCustomIconIfNeeded(itemId, cleanText, chosenCat, wasManual);
       setManualCatEmoticon(null);
       setShowComposerCatPicker(false);
       onNotify(`Nota trascritta in «${TODO_BLOCK_MAP[composerBlock].title}»`);
@@ -487,6 +584,30 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       }));
 
       onAddManyTodos(created);
+      const genericCreated = created
+        .filter((it) => {
+          const isGeneric =
+            it.emoji === 'cat_note' ||
+            it.emoji === 'cat_bills' ||
+            it.emoji === 'cat_game' ||
+            it.emoji === 'cat_sleep';
+          return isGeneric && shouldCreateCustomNekoIcon(it.text);
+        })
+        .slice(0, 4);
+      if (genericCreated.length > 0) {
+        void (async () => {
+          for (const g of genericCreated) {
+            const custom = await requestCreateCustomCatIcon(g.text);
+            if (custom) {
+              onUpdateTodo(
+                g.id,
+                { emoji: custom.id, updatedAt: new Date().toISOString() },
+                { skipUndo: true }
+              );
+            }
+          }
+        })();
+      }
       onNotify(
         `${created.length} ${created.length === 1 ? 'nota aggiunta' : 'note aggiunte'} in «${TODO_BLOCK_MAP[pasteBlock].title}»`
       );
@@ -550,9 +671,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           e.preventDefault();
           const sourceId = draggedTodoId || e.dataTransfer.getData('text/plain');
           if (sourceId) {
-            if (dragMergeTargetId && dragMergeTargetId !== sourceId) {
-              onMergeTodos(sourceId, dragMergeTargetId);
-            } else if (dragInsertBeforeId && dragInsertBeforeId !== sourceId) {
+            if (dragInsertBeforeId && dragInsertBeforeId !== sourceId) {
               onMoveOrReorderTodo(sourceId, blockKey, dragInsertBeforeId);
             } else {
               onMoveOrReorderTodo(sourceId, blockKey, null);
@@ -613,7 +732,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           </div>
         </div>
 
-        {/* Ultra-slim Note Strips + Reorder Gaps + Drop-to-Merge Targets */}
+        {/* Ultra-slim Note Strips + Reorder Targets */}
         <div className="mt-1.5 space-y-1">
           {items.length === 0 ? (
             <div className="rounded-lg border border-dashed border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1.5 text-center text-[11px] text-[var(--todo-text-muted)]">
@@ -627,10 +746,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   draggedTodoId !== null &&
                   draggedTodoId !== item.id &&
                   dragInsertBeforeId === item.id;
-                const isMergeTarget =
-                  draggedTodoId !== null &&
-                  draggedTodoId !== item.id &&
-                  dragMergeTargetId === item.id;
                 const catId = resolveCatEmoticonId(item.emoji, item.text, blockKey);
                 const hasReminder = Boolean(item.reminderDate && item.reminderTime);
                 const remShort = hasReminder
@@ -649,7 +764,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           setDragOverBlock(blockKey);
                           setDragInsertBeforeId(item.id);
                           setDragInsertEndBlock(null);
-                          setDragMergeTargetId(null);
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
@@ -671,10 +785,11 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                     )}
 
                     <div
-                      data-todo-merge-id={item.id}
+                      data-todo-item-id={item.id}
                       data-todo-block={blockKey}
                       draggable
                       onDragStart={(e) => {
+                        dragCursorRef.current = { x: e.clientX, y: e.clientY };
                         setDraggedTodoId(item.id);
                         e.dataTransfer.effectAllowed = 'move';
                         e.dataTransfer.setData('text/plain', item.id);
@@ -683,10 +798,10 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                         if (!draggedTodoId || draggedTodoId === item.id) return;
                         e.preventDefault();
                         e.stopPropagation();
+                        dragCursorRef.current = { x: e.clientX, y: e.clientY };
                         setDragOverBlock(blockKey);
-                        setDragInsertBeforeId(null);
+                        setDragInsertBeforeId(item.id);
                         setDragInsertEndBlock(null);
-                        setDragMergeTargetId(item.id);
                       }}
                       onDrop={(e) => {
                         if (!draggedTodoId || draggedTodoId === item.id) return;
@@ -694,16 +809,14 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                         e.stopPropagation();
                         const sourceId = draggedTodoId || e.dataTransfer.getData('text/plain');
                         if (sourceId && sourceId !== item.id) {
-                          onMergeTodos(sourceId, item.id);
+                          onMoveOrReorderTodo(sourceId, blockKey, item.id);
                         }
                         resetDragState();
                       }}
                       onDragEnd={resetDragState}
-                      className={`flex items-center gap-1.5 rounded-lg border px-2 py-[6px] min-h-[34px] transition-all ${
-                        isMergeTarget
-                          ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-2 ring-[var(--todo-accent)]'
-                          : 'border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)]'
-                      } ${isDragged ? 'opacity-45' : ''}`}
+                      className={`flex items-center gap-1.5 rounded-lg border px-2 py-[6px] min-h-[34px] transition-all border-[var(--todo-note-border)] bg-[var(--todo-note-bg)] hover:border-[var(--todo-accent)] ${
+                        isDragged ? 'opacity-45' : ''
+                      }`}
                     >
                       {/* Ultra-compact Touch + Mouse Drag Handle */}
                       <button
@@ -717,6 +830,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                           } catch {
                             // ignore
                           }
+                          dragCursorRef.current = { x: e.clientX, y: e.clientY };
                           pointerDragRef.current = { id: item.id, active: true };
                           setDraggedTodoId(item.id);
                         }}
@@ -801,12 +915,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                       >
                         <CopyPlus className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
-
-                      {isMergeTarget && (
-                        <span className="rounded bg-[var(--todo-accent-dark)] px-1.5 py-[1px] text-[9.5px] font-bold text-white shrink-0">
-                          Unisci
-                        </span>
-                      )}
                     </div>
                   </React.Fragment>
                 );
@@ -822,7 +930,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                     setDragOverBlock(blockKey);
                     setDragInsertBeforeId(null);
                     setDragInsertEndBlock(blockKey);
-                    setDragMergeTargetId(null);
                   }}
                   onDrop={(e) => {
                     e.preventDefault();
@@ -887,8 +994,8 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 />
                 <span>
                   {manualCatEmoticon
-                    ? CAT_EMOTICON_MAP[effectiveComposerCat].label
-                    : `Gattino · ${CAT_EMOTICON_MAP[effectiveComposerCat].label}`}
+                    ? getCatIconMeta(effectiveComposerCat).label
+                    : `Gattino · ${getCatIconMeta(effectiveComposerCat).label}`}
                 </span>
               </button>
             </div>
@@ -899,6 +1006,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               value={effectiveComposerCat}
               variant="fullFace"
               isAuto={manualCatEmoticon === null}
+              contextText={composerText}
               onSelect={(id) => {
                 setManualCatEmoticon(id);
                 setShowComposerCatPicker(false);
@@ -1111,13 +1219,16 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               <CatEmoticonPicker
                 value={resolveCatEmoticonId(selectedTodo.emoji, selectedTodo.text, selectedTodo.block)}
                 variant="fullFace"
+                contextText={modalTextDraft.trim() || selectedTodo.text}
                 onSelect={(catId) => {
+                  const targetText = modalTextDraft.trim() || selectedTodo.text;
+                  learnCatIconAssociation(targetText, catId);
                   onUpdateTodo(selectedTodo.id, {
                     emoji: catId,
                     updatedAt: new Date().toISOString(),
                   });
                   setShowModalCatPicker(false);
-                  onNotify(`Emoticon «${CAT_EMOTICON_MAP[catId].label}» applicata`);
+                  onNotify(`Emoticon «${getCatIconMeta(catId).label}» applicata e imparata`);
                 }}
               />
             )}
@@ -1554,13 +1665,11 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
       {/* Floating Drag Guidance Pill */}
       {draggedTodoId && (
         <div className="fixed bottom-16 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none rounded-full bg-[var(--todo-accent-dark)] px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-lg border border-[var(--todo-card-border)] whitespace-nowrap max-w-[92vw] truncate">
-          {dragMergeTargetId
-            ? `Rilascia per unire con «${todoItems.find((t) => t.id === dragMergeTargetId)?.text || 'nota'}»`
-            : dragInsertBeforeId || dragInsertEndBlock
-              ? 'Rilascia per spostare qui'
-              : dragOverBlock
-                ? `Rilascia in «${TODO_BLOCK_MAP[dragOverBlock].title}»`
-                : 'Trascina su una nota per unirla, o tra le righe per spostarla'}
+          {dragInsertBeforeId || dragInsertEndBlock
+            ? 'Rilascia per spostare qui'
+            : dragOverBlock
+              ? `Rilascia in «${TODO_BLOCK_MAP[dragOverBlock].title}»`
+              : 'Trascina tra le righe o in un altro blocco per spostare'}
         </div>
       )}
     </div>

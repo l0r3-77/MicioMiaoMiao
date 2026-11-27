@@ -33,8 +33,10 @@ import {
 import type { LayoutSectionKey, SectionLayoutState } from '../utils/layoutPreferences';
 import {
   COLOR_VALENCE_META,
+  NEGATIVE_SPLIT_GRADIENT,
   NOTE_COLOR_LIST,
   NOTE_COLORS,
+  getValenceBackground,
   type ColorValence,
 } from '../utils/noteColors';
 import { CHIBI_CAT_MASCOTS, getNekoForDate } from '../utils/nekoCatalog';
@@ -116,6 +118,11 @@ function scoreToValence(score: number): ColorValence {
 
 function scoreToHex(score: number): string {
   return COLOR_VALENCE_META[scoreToValence(score)].hex;
+}
+
+function scoreToSvgFill(score: number, gradId = 'negSplitGrad'): string {
+  if (score <= -1.45) return `url(#${gradId})`;
+  return scoreToHex(score);
 }
 
 function normalizeBulletText(raw: string): string {
@@ -396,6 +403,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
   const [exportingState, setExportingState] = useState<string | null>(null);
 
   const timelineChartRef = useRef<HTMLDivElement | null>(null);
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const valenceBarsScrollRef = useRef<HTMLDivElement | null>(null);
   const colorsChartRef = useRef<HTMLDivElement | null>(null);
   const hourlyChartRef = useRef<HTMLDivElement | null>(null);
 
@@ -529,6 +538,50 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     );
   }, [dailyNotes, dateRange, selectedColors, dayPeriodFilter, keywordFilter]);
 
+  // All entries passing color/period/keyword filters across all dates (for single-day 00:00-24:00 boundary interpolation)
+  const nonDateFilteredEntries = useMemo<FlatEntry[]>(() => {
+    const q = keywordFilter.trim().toLowerCase();
+    const result: FlatEntry[] = [];
+
+    for (const dn of dailyNotes) {
+      for (const entry of dn.entries) {
+        const safeColor: NoteColor = entry.color in NOTE_COLORS ? entry.color : 'amber';
+        if (selectedColors.length > 0 && !selectedColors.includes(safeColor)) continue;
+
+        const dp = getDayPeriod(entry.time || '09:00');
+        if (dayPeriodFilter !== 'all' && dp !== dayPeriodFilter) continue;
+
+        if (q) {
+          const matchesText =
+            entry.transcript.toLowerCase().includes(q) ||
+            entry.bullets.some((b) => b.toLowerCase().includes(q));
+          if (!matchesText) continue;
+        }
+
+        const timeParts = (entry.time || '09:00').split(':');
+        const parsedHour = Number(timeParts[0]);
+        const parsedMin = Number(timeParts[1]);
+        const hour = Number.isFinite(parsedHour) ? Math.max(0, Math.min(23, parsedHour)) : 9;
+        const minute = Number.isFinite(parsedMin) ? Math.max(0, Math.min(59, parsedMin)) : 0;
+        const meta = NOTE_COLORS[safeColor];
+
+        result.push({
+          date: dn.date,
+          entry: { ...entry, color: safeColor },
+          period: dp,
+          hour,
+          minute,
+          colorValence: meta.valence,
+          colorScore: meta.valenceScore,
+        });
+      }
+    }
+
+    return result.sort((a, b) =>
+      `${a.date} ${a.entry.time}`.localeCompare(`${b.date} ${b.entry.time}`)
+    );
+  }, [dailyNotes, selectedColors, dayPeriodFilter, keywordFilter]);
+
   const activeDaysCount = useMemo(() => {
     return new Set(flatEntries.map((item) => item.date)).size;
   }, [flatEntries]);
@@ -606,10 +659,14 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         mild_negative: 0,
         negative: 0,
       };
+      let redCount = 0;
+      let anthraciteCount = 0;
       const areaStatsMap = new Map<string, { count: number; scoreSum: number }>();
 
       for (const item of items) {
         valenceCounts[item.colorValence]++;
+        if (item.entry.color === 'red') redCount++;
+        else if (item.entry.color === 'anthracite') anthraciteCount++;
         for (const b of item.entry.bullets) {
           const clean = normalizeBulletText(b);
           if (!clean) continue;
@@ -648,6 +705,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         count: items.length,
         pct: flatEntries.length ? Math.round((items.length / flatEntries.length) * 100) : 0,
         valenceCounts,
+        redCount,
+        anthraciteCount,
         topAreas,
       };
     });
@@ -695,7 +754,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     if (periodFilter !== 'all') {
       let cursor = dateRange.start;
       let guard = 0;
-      while (cursor <= dateRange.end && guard < 62) {
+      while (cursor <= dateRange.end && guard < 180) {
         byDate.set(cursor, []);
         cursor = addDaysISO(cursor, 1);
         guard++;
@@ -715,7 +774,9 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         const posCount = items.filter((i) => i.colorValence === 'positive').length;
         const midCount = items.filter((i) => i.colorValence === 'middle').length;
         const mildNegCount = items.filter((i) => i.colorValence === 'mild_negative').length;
-        const negCount = items.filter((i) => i.colorValence === 'negative').length;
+        const redCount = items.filter((i) => i.entry.color === 'red').length;
+        const anthraciteCount = items.filter((i) => i.entry.color === 'anthracite').length;
+        const negCount = redCount + anthraciteCount;
 
         const scoreSum = items.reduce((acc, i) => acc + i.colorScore, 0);
         const avgScore = items.length > 0 ? scoreSum / items.length : null;
@@ -739,6 +800,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           posCount,
           midCount,
           mildNegCount,
+          redCount,
+          anthraciteCount,
           negCount,
           avgScore,
           topBullet: topBullet || null,
@@ -765,7 +828,9 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         const posCount = items.filter((i) => i.colorValence === 'positive').length;
         const midCount = items.filter((i) => i.colorValence === 'middle').length;
         const mildNegCount = items.filter((i) => i.colorValence === 'mild_negative').length;
-        const negCount = items.filter((i) => i.colorValence === 'negative').length;
+        const redCount = items.filter((i) => i.entry.color === 'red').length;
+        const anthraciteCount = items.filter((i) => i.entry.color === 'anthracite').length;
+        const negCount = redCount + anthraciteCount;
         const scoreSum = items.reduce((acc, i) => acc + i.colorScore, 0);
         const avgScore = scoreSum / items.length;
         const topBullet = items
@@ -783,6 +848,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           posCount,
           midCount,
           mildNegCount,
+          redCount,
+          anthraciteCount,
           negCount,
           avgScore,
           topBullet: topBullet || null,
@@ -809,78 +876,159 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     );
   }, [activeTimelineItems, selectedTimelineKey]);
 
-  // SVG horizontal line chart geometry (hours for single day, days for multi-day)
+  // SVG horizontal line chart geometry (hours 00-24 for single day, scrollable days with pinned Y-axis for multi-day)
   const lineChartGeometry = useMemo(() => {
-    const width = 600;
-    const height = 186;
-    const padX = 34;
-    const padRight = 18;
-    const padY = 16;
+    const height = 208;
+    const padTop = 18;
     const padBottom = 34;
-    const usableW = width - padX - padRight;
-    const usableH = height - padY - padBottom;
-    const scoreToY = (s: number) => padY + ((2 - Math.max(-2, Math.min(2, s))) / 4) * usableH;
+    const usableH = height - padTop - padBottom;
+    const scoreToY = (s: number) => padTop + ((2 - Math.max(-2, Math.min(2, s))) / 4) * usableH;
 
     if (periodFilter === 'single_day') {
+      const plotWidth = 540;
+      const plotPadX = 16;
+      const plotPadRight = 18;
+      const usableW = plotWidth - plotPadX - plotPadRight;
+      const targetDay = singleDayDate || todayISO;
+      const targetMs = parseISODate(targetDay).getTime();
+      const MS_PER_DAY = 86400000;
+
       const points = singleDayTimelineSlots.map((slot) => {
-        const x = padX + (Math.max(0, Math.min(24, slot.hourFloat)) / 24) * usableW;
+        const x = plotPadX + (Math.max(0, Math.min(24, slot.hourFloat)) / 24) * usableW;
         const y = scoreToY(slot.avgScore);
         return {
           x,
           y,
           score: slot.avgScore,
-          color: scoreToHex(slot.avgScore),
+          svgFill: scoreToSvgFill(slot.avgScore),
           bucket: slot,
         };
       });
 
-      const hourTicks = [0, 6, 9, 12, 15, 18, 21, 24].map((h) => ({
-        x: padX + (h / 24) * usableW,
+      const hourTicks = [0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => ({
+        x: plotPadX + (h / 24) * usableW,
         label: h === 24 ? '24:00' : `${String(h).padStart(2, '0')}:00`,
       }));
 
-      const polyline = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      // Interpolate continuous 00:00 start & 24:00 end using nearest entries before and after singleDayDate
+      const beforeEntries = nonDateFilteredEntries.filter((e) => e.date < targetDay);
+      const afterEntries = nonDateFilteredEntries.filter((e) => e.date > targetDay);
+      const lastPrevEntry =
+        beforeEntries.length > 0 ? beforeEntries[beforeEntries.length - 1] : null;
+      const firstNextEntry = afterEntries.length > 0 ? afterEntries[0] : null;
+
+      let fullPathPoints: Array<{ x: number; y: number; score: number; label: string; isBoundary?: boolean }> = [];
+      let boundaryHints: Array<{ x: number; y: number; title: string }> = [];
+
+      if (points.length > 0) {
+        const firstSlot = singleDayTimelineSlots[0];
+        const lastSlot = singleDayTimelineSlots[singleDayTimelineSlots.length - 1];
+
+        let startScore = firstSlot.avgScore;
+        let startHint = '00:00 (proiezione inizio giornata)';
+        if (lastPrevEntry) {
+          const prevDaysDiff = Math.max(
+            1,
+            Math.round((targetMs - parseISODate(lastPrevEntry.date).getTime()) / MS_PER_DAY)
+          );
+          const prevHour = lastPrevEntry.hour + lastPrevEntry.minute / 60;
+          const dtBefore = Math.max(0.25, prevDaysDiff * 24 - prevHour);
+          const dtAfter = Math.max(0.25, firstSlot.hourFloat);
+          startScore =
+            lastPrevEntry.colorScore +
+            (firstSlot.avgScore - lastPrevEntry.colorScore) * (dtBefore / (dtBefore + dtAfter));
+          startHint = `00:00 (da ${formatItalianDateShort(lastPrevEntry.date)} · valenza ${startScore.toFixed(2)})`;
+        }
+
+        let endScore = lastSlot.avgScore;
+        let endHint = '24:00 (proiezione fine giornata)';
+        if (firstNextEntry) {
+          const nextDaysDiff = Math.max(
+            1,
+            Math.round((parseISODate(firstNextEntry.date).getTime() - targetMs) / MS_PER_DAY)
+          );
+          const nextHour = firstNextEntry.hour + firstNextEntry.minute / 60;
+          const dtBefore = Math.max(0.25, 24 - lastSlot.hourFloat);
+          const dtAfter = Math.max(0.25, (nextDaysDiff - 1) * 24 + nextHour);
+          endScore =
+            lastSlot.avgScore +
+            (firstNextEntry.colorScore - lastSlot.avgScore) * (dtBefore / (dtBefore + dtAfter));
+          endHint = `24:00 (verso ${formatItalianDateShort(firstNextEntry.date)} · valenza ${endScore.toFixed(2)})`;
+        }
+
+        const x0 = plotPadX;
+        const y0 = scoreToY(startScore);
+        const x24 = plotPadX + usableW;
+        const y24 = scoreToY(endScore);
+
+        fullPathPoints = [
+          { x: x0, y: y0, score: startScore, label: startHint, isBoundary: true },
+          ...points.map((p) => ({ x: p.x, y: p.y, score: p.score, label: p.bucket.shortLabel })),
+          { x: x24, y: y24, score: endScore, label: endHint, isBoundary: true },
+        ];
+        boundaryHints = [
+          { x: x0, y: y0, title: startHint },
+          { x: x24, y: y24, title: endHint },
+        ];
+      }
+
+      const polyline = fullPathPoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
       const baseY = scoreToY(-2);
       const areaPath =
-        points.length > 1
-          ? `M ${points[0].x.toFixed(1)} ${baseY.toFixed(1)} ` +
-            points.map((p) => `L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') +
-            ` L ${points[points.length - 1].x.toFixed(1)} ${baseY.toFixed(1)} Z`
+        fullPathPoints.length > 1
+          ? `M ${fullPathPoints[0].x.toFixed(1)} ${baseY.toFixed(1)} ` +
+            fullPathPoints.map((p) => `L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') +
+            ` L ${fullPathPoints[fullPathPoints.length - 1].x.toFixed(1)} ${baseY.toFixed(1)} Z`
           : '';
 
-      return { width, height, padX, padRight, scoreToY, points, polyline, areaPath, xTicks: hourTicks };
+      return {
+        plotWidth,
+        height,
+        plotPadX,
+        plotPadRight,
+        scoreToY,
+        points,
+        boundaryHints,
+        polyline,
+        areaPath,
+        xTicks: hourTicks,
+      };
     }
+
+    const totalDays = timelineBuckets.length;
+    const plotWidth = Math.max(520, totalDays * 38);
+    const plotPadX = 18;
+    const plotPadRight = 18;
+    const usableW = plotWidth - plotPadX - plotPadRight;
 
     const scoredIndices = timelineBuckets
       .map((b, idx) => ({ bucket: b, idx }))
       .filter((x) => x.bucket.avgScore !== null);
 
-    const denom = Math.max(1, timelineBuckets.length - 1);
+    const denom = Math.max(1, totalDays - 1);
     const points = scoredIndices.map(({ bucket, idx }) => {
-      const x = timelineBuckets.length === 1 ? padX + usableW / 2 : padX + (idx / denom) * usableW;
+      const x = totalDays === 1 ? plotPadX + usableW / 2 : plotPadX + (idx / denom) * usableW;
       const score = bucket.avgScore ?? 0;
       const y = scoreToY(score);
-      return { x, y, score, color: scoreToHex(score), bucket };
+      return { x, y, score, svgFill: scoreToSvgFill(score), bucket };
     });
 
-    // Evenly spaced day labels along X-axis
     const xTicks: Array<{ x: number; label: string }> = [];
-    const totalDays = timelineBuckets.length;
     if (totalDays > 0) {
       if (totalDays === 1) {
-        xTicks.push({ x: padX + usableW / 2, label: timelineBuckets[0].axisLabel });
+        xTicks.push({ x: plotPadX + usableW / 2, label: timelineBuckets[0].axisLabel });
       } else {
-        const maxTicks = totalDays <= 8 ? totalDays : 7;
-        const chosenIndices = new Set<number>();
-        for (let t = 0; t < maxTicks; t++) {
-          const idx = Math.round((t / (maxTicks - 1)) * (totalDays - 1));
-          chosenIndices.add(idx);
-        }
-        for (const idx of Array.from(chosenIndices).sort((a, b) => a - b)) {
-          xTicks.push({
-            x: padX + (idx / denom) * usableW,
-            label: timelineBuckets[idx].axisLabel,
-          });
+        const tickStep = totalDays <= 14 ? 1 : totalDays <= 35 ? 3 : 5;
+        for (let idx = 0; idx < totalDays; idx++) {
+          if (idx === 0 || idx === totalDays - 1 || idx % tickStep === 0) {
+            if (idx !== totalDays - 1 && totalDays - 1 - idx < Math.max(1, Math.floor(tickStep / 2))) {
+              continue;
+            }
+            xTicks.push({
+              x: plotPadX + (idx / denom) * usableW,
+              label: timelineBuckets[idx].axisLabel,
+            });
+          }
         }
       }
     }
@@ -894,8 +1042,58 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           ` L ${points[points.length - 1].x.toFixed(1)} ${baseY.toFixed(1)} Z`
         : '';
 
-    return { width, height, padX, padRight, scoreToY, points, polyline, areaPath, xTicks };
-  }, [periodFilter, singleDayTimelineSlots, timelineBuckets]);
+    return {
+      plotWidth,
+      height,
+      plotPadX,
+      plotPadRight,
+      scoreToY,
+      points,
+      boundaryHints: [] as Array<{ x: number; y: number; title: string }>,
+      polyline,
+      areaPath,
+      xTicks,
+    };
+  }, [
+    periodFilter,
+    singleDayDate,
+    todayISO,
+    singleDayTimelineSlots,
+    timelineBuckets,
+    nonDateFilteredEntries,
+  ]);
+
+  // Auto-scroll timeline horizontally to rightmost (current/most recent days) whenever filters or mode change
+  useEffect(() => {
+    if (periodFilter === 'single_day') return;
+    const scrollRight = () => {
+      if (timelineScrollRef.current) {
+        const el = timelineScrollRef.current;
+        if (el.scrollWidth > el.clientWidth) {
+          el.scrollLeft = el.scrollWidth - el.clientWidth;
+        }
+      }
+      if (valenceBarsScrollRef.current) {
+        const el = valenceBarsScrollRef.current;
+        if (el.scrollWidth > el.clientWidth) {
+          el.scrollLeft = el.scrollWidth - el.clientWidth;
+        }
+      }
+    };
+    const rafId = window.requestAnimationFrame(scrollRight);
+    const tId = window.setTimeout(scrollRight, 80);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(tId);
+    };
+  }, [
+    periodFilter,
+    prefs.timelineChartType,
+    timelineBuckets.length,
+    flatEntries.length,
+    dateRange.start,
+    dateRange.end,
+  ]);
 
   // Sensations analytics: unified similar phrases, grouped by area, ordered +2 to -2 vertically
   const sensationAnalytics = useMemo(() => {
@@ -1304,131 +1502,256 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   Servono appunti nel periodo per tracciare la linea emotiva.
                 </p>
               ) : (
-                <div className="w-full overflow-x-auto">
+                <>
+                  <div className="flex items-stretch">
+                    {/* Pinned non-scrolling vertical score Y-axis (+2 to -2) */}
+                    <div className="shrink-0 w-[44px] border-r border-[var(--app-divider)]/60 bg-[var(--app-card)] z-10">
+                      <svg
+                        width="44"
+                        height={lineChartGeometry.height}
+                        viewBox={`0 0 44 ${lineChartGeometry.height}`}
+                        className="block"
+                        aria-hidden="true"
+                      >
+                        <defs>
+                          <linearGradient id="negSplitAxisGrad" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="50%" stopColor="#EF4444" />
+                            <stop offset="50%" stopColor="#3F3F46" />
+                          </linearGradient>
+                        </defs>
+                        {[
+                          { val: '+2', s: 2, textCol: '#0284C7', fill: '#0EA5E9' },
+                          { val: '+1', s: 1, textCol: '#0EA5E9', fill: '#7DD3FC' },
+                          { val: '0', s: 0, textCol: '#D97706', fill: '#F59E0B' },
+                          { val: '-1', s: -1, textCol: '#E11D48', fill: '#FB7185' },
+                          { val: '-2', s: -2, textCol: '#DC2626', fill: 'url(#negSplitAxisGrad)' },
+                        ].map((ref) => {
+                          const ry = lineChartGeometry.scoreToY(ref.s);
+                          return (
+                            <g key={ref.val}>
+                              <circle cx="9" cy={ry} r="4" fill={ref.fill} />
+                              <text
+                                x="39"
+                                y={ry + 3.5}
+                                textAnchor="end"
+                                fontSize="10.5"
+                                fontWeight="600"
+                                fill={ref.textCol}
+                                fontFamily="monospace"
+                              >
+                                {ref.val}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+
+                    {/* Horizontally scrollable chart plot */}
+                    <div ref={timelineScrollRef} className="flex-1 min-w-0 overflow-x-auto">
+                      <svg
+                        width={lineChartGeometry.plotWidth}
+                        height={lineChartGeometry.height}
+                        viewBox={`0 0 ${lineChartGeometry.plotWidth} ${lineChartGeometry.height}`}
+                        className="block"
+                        role="img"
+                        aria-label="Grafico orizzontale a linea della valenza emotiva (+2 a -2)"
+                      >
+                        <defs>
+                          <linearGradient id="moodAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#0EA5E9" stopOpacity="0.22" />
+                            <stop offset="25%" stopColor="#7DD3FC" stopOpacity="0.16" />
+                            <stop offset="50%" stopColor="#F59E0B" stopOpacity="0.10" />
+                            <stop offset="75%" stopColor="#FB7185" stopOpacity="0.10" />
+                            <stop offset="90%" stopColor="#EF4444" stopOpacity="0.16" />
+                            <stop offset="100%" stopColor="#3F3F46" stopOpacity="0.22" />
+                          </linearGradient>
+                          <linearGradient id="negSplitGrad" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="50%" stopColor="#EF4444" />
+                            <stop offset="50%" stopColor="#3F3F46" />
+                          </linearGradient>
+                        </defs>
+
+                        {[2, 1, 0, -1, -2].map((s) => {
+                          const ry = lineChartGeometry.scoreToY(s);
+                          return (
+                            <line
+                              key={s}
+                              x1={lineChartGeometry.plotPadX}
+                              y1={ry}
+                              x2={lineChartGeometry.plotWidth - lineChartGeometry.plotPadRight}
+                              y2={ry}
+                              stroke="var(--app-divider)"
+                              strokeDasharray="3 3"
+                            />
+                          );
+                        })}
+
+                        <line
+                          x1={lineChartGeometry.plotPadX}
+                          y1={lineChartGeometry.scoreToY(-2) + 8}
+                          x2={lineChartGeometry.plotWidth - lineChartGeometry.plotPadRight}
+                          y2={lineChartGeometry.scoreToY(-2) + 8}
+                          stroke="var(--app-divider)"
+                          strokeWidth="1"
+                        />
+                        {lineChartGeometry.xTicks.map((tick, idx) => (
+                          <g key={`${tick.label}-${idx}`}>
+                            <line
+                              x1={tick.x}
+                              y1={lineChartGeometry.scoreToY(2)}
+                              x2={tick.x}
+                              y2={lineChartGeometry.scoreToY(-2) + 8}
+                              stroke="var(--app-divider)"
+                              strokeOpacity="0.45"
+                              strokeWidth="1"
+                            />
+                            <text
+                              x={tick.x}
+                              y={lineChartGeometry.height - 8}
+                              textAnchor={
+                                idx === 0
+                                  ? 'start'
+                                  : idx === lineChartGeometry.xTicks.length - 1
+                                    ? 'end'
+                                    : 'middle'
+                              }
+                              fontSize="9.5"
+                              fill="var(--app-text-subtle)"
+                              fontFamily="monospace"
+                            >
+                              {tick.label}
+                            </text>
+                          </g>
+                        ))}
+
+                        {lineChartGeometry.areaPath && (
+                          <path d={lineChartGeometry.areaPath} fill="url(#moodAreaGrad)" />
+                        )}
+                        {lineChartGeometry.polyline && (
+                          <polyline
+                            fill="none"
+                            stroke="var(--app-text)"
+                            strokeWidth="2.2"
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                            points={lineChartGeometry.polyline}
+                          />
+                        )}
+                        {lineChartGeometry.boundaryHints.map((bh, bIdx) => (
+                          <circle
+                            key={`boundary-${bIdx}`}
+                            cx={bh.x}
+                            cy={bh.y}
+                            r={2.8}
+                            fill="var(--app-card)"
+                            stroke="var(--app-text-muted)"
+                            strokeWidth="1.5"
+                          >
+                            <title>{bh.title}</title>
+                          </circle>
+                        ))}
+                        {lineChartGeometry.points.map((pt) => {
+                          const isSelected = activeBucket?.key === pt.bucket.key;
+                          return (
+                            <g
+                              key={pt.bucket.key}
+                              className="cursor-pointer"
+                              onClick={() => setSelectedTimelineKey(pt.bucket.key)}
+                            >
+                              <circle
+                                cx={pt.x}
+                                cy={pt.y}
+                                r={isSelected ? 6.5 : 4.8}
+                                fill={pt.svgFill}
+                                stroke="var(--app-card)"
+                                strokeWidth="2"
+                              />
+                              <title>
+                                {`${pt.bucket.shortLabel}: media ${pt.score.toFixed(2)} (${pt.bucket.total} appunti)`}
+                              </title>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </div>
+
+                  {/* Hidden combined SVG (pinned Y-axis + plot) for PDF Export */}
                   <svg
-                    viewBox={`0 0 ${lineChartGeometry.width} ${lineChartGeometry.height}`}
-                    className="w-full min-w-[320px] h-52"
-                    role="img"
-                    aria-label="Grafico orizzontale a linea della valenza emotiva (+2 a -2)"
+                    data-export-chart="true"
+                    viewBox={`0 0 ${lineChartGeometry.plotWidth + 44} ${lineChartGeometry.height}`}
+                    className="sr-only"
+                    aria-hidden="true"
                   >
                     <defs>
-                      <linearGradient id="moodAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0EA5E9" stopOpacity="0.22" />
-                        <stop offset="25%" stopColor="#7DD3FC" stopOpacity="0.16" />
-                        <stop offset="50%" stopColor="#F59E0B" stopOpacity="0.10" />
-                        <stop offset="75%" stopColor="#FB7185" stopOpacity="0.10" />
-                        <stop offset="100%" stopColor="#EF4444" stopOpacity="0.16" />
+                      <linearGradient id="negSplitPdfLineGrad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="50%" stopColor="#EF4444" />
+                        <stop offset="50%" stopColor="#3F3F46" />
                       </linearGradient>
                     </defs>
-
-                    {/* Reference score lines (+2, +1, 0, -1, -2) */}
                     {[
-                      { val: '+2', s: 2, col: '#0284C7' },
-                      { val: '+1', s: 1, col: '#0EA5E9' },
-                      { val: '0', s: 0, col: '#D97706' },
-                      { val: '-1', s: -1, col: '#E11D48' },
-                      { val: '-2', s: -2, col: '#DC2626' },
+                      { val: '+2', s: 2, col: '#0284C7', fill: '#0EA5E9' },
+                      { val: '+1', s: 1, col: '#0EA5E9', fill: '#7DD3FC' },
+                      { val: '0', s: 0, col: '#D97706', fill: '#F59E0B' },
+                      { val: '-1', s: -1, col: '#E11D48', fill: '#FB7185' },
+                      { val: '-2', s: -2, col: '#DC2626', fill: 'url(#negSplitPdfLineGrad)' },
                     ].map((ref) => {
                       const ry = lineChartGeometry.scoreToY(ref.s);
                       return (
                         <g key={ref.val}>
-                          <line
-                            x1={lineChartGeometry.padX}
-                            y1={ry}
-                            x2={lineChartGeometry.width - lineChartGeometry.padRight}
-                            y2={ry}
-                            stroke="var(--app-divider)"
-                            strokeDasharray="3 3"
-                          />
-                          <text
-                            x="6"
-                            y={ry + 3.5}
-                            fontSize="10"
-                            fill={ref.col}
-                            fontFamily="monospace"
-                          >
+                          <circle cx="9" cy={ry} r="4" fill={ref.fill} />
+                          <text x="38" y={ry + 3.5} textAnchor="end" fontSize="10" fill={ref.col} fontFamily="monospace">
                             {ref.val}
                           </text>
+                          <line
+                            x1={44 + lineChartGeometry.plotPadX}
+                            y1={ry}
+                            x2={44 + lineChartGeometry.plotWidth - lineChartGeometry.plotPadRight}
+                            y2={ry}
+                            stroke="#E7E5E4"
+                            strokeDasharray="3 3"
+                          />
                         </g>
                       );
                     })}
-
-                    {/* Horizontal baseline & X-axis labels (Hours for 1 day, Days for other periods) */}
-                    <line
-                      x1={lineChartGeometry.padX}
-                      y1={lineChartGeometry.scoreToY(-2) + 8}
-                      x2={lineChartGeometry.width - lineChartGeometry.padRight}
-                      y2={lineChartGeometry.scoreToY(-2) + 8}
-                      stroke="var(--app-divider)"
-                      strokeWidth="1"
-                    />
                     {lineChartGeometry.xTicks.map((tick, idx) => (
-                      <g key={`${tick.label}-${idx}`}>
-                        <line
-                          x1={tick.x}
-                          y1={lineChartGeometry.scoreToY(2)}
-                          x2={tick.x}
-                          y2={lineChartGeometry.scoreToY(-2) + 8}
-                          stroke="var(--app-divider)"
-                          strokeOpacity="0.45"
-                          strokeWidth="1"
-                        />
-                        <text
-                          x={tick.x}
-                          y={lineChartGeometry.height - 6}
-                          textAnchor={
-                            idx === 0
-                              ? 'start'
-                              : idx === lineChartGeometry.xTicks.length - 1
-                                ? 'end'
-                                : 'middle'
-                          }
-                          fontSize="9.5"
-                          fill="var(--app-text-subtle)"
-                          fontFamily="monospace"
-                        >
-                          {tick.label}
-                        </text>
-                      </g>
+                      <text
+                        key={`pdf-x-${idx}`}
+                        x={44 + tick.x}
+                        y={lineChartGeometry.height - 8}
+                        textAnchor="middle"
+                        fontSize="9.5"
+                        fill="#78716C"
+                        fontFamily="monospace"
+                      >
+                        {tick.label}
+                      </text>
                     ))}
-
-                    {lineChartGeometry.areaPath && (
-                      <path d={lineChartGeometry.areaPath} fill="url(#moodAreaGrad)" />
-                    )}
-                    {lineChartGeometry.points.length > 1 && (
+                    {lineChartGeometry.polyline && (
                       <polyline
                         fill="none"
-                        stroke="var(--app-text)"
+                        stroke="#292524"
                         strokeWidth="2.2"
                         strokeLinejoin="round"
                         strokeLinecap="round"
+                        transform="translate(44, 0)"
                         points={lineChartGeometry.polyline}
                       />
                     )}
-                    {lineChartGeometry.points.map((pt) => {
-                      const isSelected = activeBucket?.key === pt.bucket.key;
-                      return (
-                        <g
-                          key={pt.bucket.key}
-                          className="cursor-pointer"
-                          onClick={() => setSelectedTimelineKey(pt.bucket.key)}
-                        >
-                          <circle
-                            cx={pt.x}
-                            cy={pt.y}
-                            r={isSelected ? 6.5 : 4.5}
-                            fill={pt.color}
-                            stroke="var(--app-card)"
-                            strokeWidth="2"
-                          />
-                          <title>
-                            {`${pt.bucket.shortLabel}: media ${pt.score.toFixed(2)} (${pt.bucket.total} appunti)`}
-                          </title>
-                        </g>
-                      );
-                    })}
+                    {lineChartGeometry.points.map((pt) => (
+                      <circle
+                        key={`pdf-pt-${pt.bucket.key}`}
+                        cx={44 + pt.x}
+                        cy={pt.y}
+                        r={4.5}
+                        fill={pt.score <= -1.45 ? 'url(#negSplitPdfLineGrad)' : scoreToHex(pt.score)}
+                        stroke="#FFFFFF"
+                        strokeWidth="1.5"
+                      />
+                    ))}
                   </svg>
-                </div>
+                </>
               )}
             </div>
           ) : (
@@ -1438,7 +1761,10 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   Servono appunti nel periodo per mostrare le fasce di valenza.
                 </p>
               ) : (
-                <div className="flex items-end gap-1.5 overflow-x-auto pb-2 min-h-[156px]">
+                <div
+                  ref={valenceBarsScrollRef}
+                  className="flex items-end gap-1.5 overflow-x-auto pb-2 min-h-[156px]"
+                >
                   {activeTimelineItems.map((bucket) => {
                     const isSelected = activeBucket?.key === bucket.key;
                     const heightPct = bucket.total
@@ -1451,7 +1777,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                         type="button"
                         onClick={() => setSelectedTimelineKey(bucket.key)}
                         aria-label={`${bucket.shortLabel}: ${bucket.total} appunti`}
-                        className={`group flex flex-col items-center justify-end gap-1.5 min-w-[30px] flex-1 h-[140px] rounded-lg px-0.5 py-1 transition-colors ${
+                        className={`group flex flex-col items-center justify-end gap-1.5 min-w-[34px] flex-1 shrink-0 h-[140px] rounded-lg px-0.5 py-1 transition-colors ${
                           isSelected ? 'bg-[var(--app-accent-soft)]' : 'hover:bg-[var(--app-card-alt)]'
                         }`}
                       >
@@ -1463,10 +1789,16 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                               style={{ height: `${heightPct}%` }}
                               className="w-full flex flex-col-reverse overflow-hidden rounded-md border border-[var(--app-border)]"
                             >
-                              {bucket.negCount > 0 && (
+                              {bucket.anthraciteCount > 0 && (
                                 <div
-                                  style={{ flexGrow: bucket.negCount, backgroundColor: '#EF4444' }}
-                                  title={`Malissimo (-2 · Rosso/Antracita): ${bucket.negCount}`}
+                                  style={{ flexGrow: bucket.anthraciteCount, backgroundColor: '#3F3F46' }}
+                                  title={`Malissimo (-2 · Antracita): ${bucket.anthraciteCount}`}
+                                />
+                              )}
+                              {bucket.redCount > 0 && (
+                                <div
+                                  style={{ flexGrow: bucket.redCount, backgroundColor: '#EF4444' }}
+                                  title={`Malissimo (-2 · Rosso): ${bucket.redCount}`}
                                 />
                               )}
                               {bucket.mildNegCount > 0 && (
@@ -1514,11 +1846,17 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
 
               {/* Compact SVG snapshot for PDF export when Fasce valenza is active */}
               {activeTimelineItems.length > 0 && (
-                <svg viewBox="0 0 600 100" className="sr-only" aria-hidden="true">
-                  {activeTimelineItems.slice(0, 31).map((b, i, arr) => {
+                <svg data-export-chart="true" viewBox="0 0 600 100" className="sr-only" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="negSplitPdfBarGrad" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="50%" stopColor="#EF4444" />
+                      <stop offset="50%" stopColor="#3F3F46" />
+                    </linearGradient>
+                  </defs>
+                  {activeTimelineItems.slice(-31).map((b, i, arr) => {
                     const slotW = 560 / Math.max(1, arr.length);
                     const barH = b.total ? Math.max(8, (b.total / maxTimelineTotal) * 76) : 2;
-                    const fillHex = b.avgScore !== null ? scoreToHex(b.avgScore) : '#E7E5E4';
+                    const fillVal = b.avgScore !== null ? scoreToSvgFill(b.avgScore, 'negSplitPdfBarGrad') : '#E7E5E4';
                     return (
                       <rect
                         key={b.key}
@@ -1527,7 +1865,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                         width={Math.max(4, slotW - 3)}
                         height={barH}
                         rx="2"
-                        fill={b.total > 0 ? fillHex : '#E7E5E4'}
+                        fill={b.total > 0 ? fillVal : '#E7E5E4'}
                       />
                     );
                   })}
@@ -1566,7 +1904,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     key={item.valence}
                     style={{
                       width: `${(item.count / (flatEntries.length || 1)) * 100}%`,
-                      backgroundColor: item.meta.hex,
+                      background: getValenceBackground(item.valence),
                     }}
                     title={`${item.meta.label} (${item.meta.scoreLabel}): ${item.count} (${item.pct}%)`}
                   />
@@ -1593,7 +1931,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       className="h-full rounded-full transition-all"
                       style={{
                         width: `${item.pct}%`,
-                        backgroundColor: item.meta.hex,
+                        background: getValenceBackground(item.valence),
                       }}
                     />
                   </div>
@@ -1602,16 +1940,24 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
             </div>
 
             {flatEntries.length > 0 && (
-              <svg viewBox="0 0 600 96" className="sr-only" aria-hidden="true">
+              <svg data-export-chart="true" viewBox="0 0 600 96" className="sr-only" aria-hidden="true">
+                <defs>
+                  <linearGradient id="negSplitPdfColorGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="50%" stopColor="#EF4444" />
+                    <stop offset="50%" stopColor="#3F3F46" />
+                  </linearGradient>
+                </defs>
                 {colorValenceStats.map((item, idx) => {
                   const y = 6 + idx * 18;
                   const barW = Math.max(4, Math.round((item.pct / 100) * 440));
+                  const fillVal =
+                    item.valence === 'negative' ? 'url(#negSplitPdfColorGrad)' : item.meta.hex;
                   return (
                     <g key={item.valence}>
                       <text x="4" y={y + 11} fontSize="10" fill="#44403C" fontFamily="sans-serif">
                         {item.meta.scoreLabel} {item.meta.label}
                       </text>
-                      <rect x="130" y={y + 2} width={barW} height="11" rx="3" fill={item.meta.hex} />
+                      <rect x="130" y={y + 2} width={barW} height="11" rx="3" fill={fillVal} />
                       <text x={136 + barW} y={y + 11} fontSize="9.5" fill="#57534E" fontFamily="monospace">
                         {item.count} ({item.pct}%)
                       </text>
@@ -1666,6 +2012,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           {prefs.hourlyChartType === 'hours24' ? (
             <div className="mt-4">
               <svg
+                data-export-chart="true"
                 viewBox="0 0 480 96"
                 className="w-full h-24"
                 role="img"
@@ -1762,13 +2109,22 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                               title={`Male (-1 Rosso chiaro): ${dp.valenceCounts.mild_negative}`}
                             />
                           )}
-                          {dp.valenceCounts.negative > 0 && (
+                          {dp.redCount > 0 && (
                             <div
                               style={{
-                                width: `${(dp.valenceCounts.negative / total) * 100}%`,
+                                width: `${(dp.redCount / total) * 100}%`,
                                 backgroundColor: '#EF4444',
                               }}
-                              title={`Malissimo (-2 Rosso/Antracita): ${dp.valenceCounts.negative}`}
+                              title={`Malissimo (-2 Rosso): ${dp.redCount}`}
+                            />
+                          )}
+                          {dp.anthraciteCount > 0 && (
+                            <div
+                              style={{
+                                width: `${(dp.anthraciteCount / total) * 100}%`,
+                                backgroundColor: '#3F3F46',
+                              }}
+                              title={`Malissimo (-2 Antracita): ${dp.anthraciteCount}`}
                             />
                           )}
                         </>
@@ -1778,7 +2134,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 );
               })}
               {flatEntries.length > 0 && (
-                <svg viewBox="0 0 600 84" className="sr-only" aria-hidden="true">
+                <svg data-export-chart="true" viewBox="0 0 600 84" className="sr-only" aria-hidden="true">
                   {dayPeriodStats.map((dp, idx) => {
                     const y = 6 + idx * 19;
                     const barW = Math.max(4, Math.round((dp.pct / 100) * 430));
@@ -1836,7 +2192,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                         <span className="font-medium text-[var(--app-text)]">{a.area}:</span>
                         <span
                           className="inline-block h-2 w-7 rounded-full shrink-0"
-                          style={{ backgroundColor: a.colorHex }}
+                          style={{ background: getValenceBackground(a.valence) }}
                           aria-label={`punteggio ${a.scoreLabel}`}
                         />
                       </span>
@@ -1945,8 +2301,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       <div
                         style={{
                           width: `${(sensationAnalytics.negativeCount / sensationAnalytics.totalBullets) * 100}%`,
+                          background: NEGATIVE_SPLIT_GRADIENT,
                         }}
-                        className="bg-red-500"
                         title={`Malissimo (-2 Rosso/Antracita): ${sensationAnalytics.negativeCount}`}
                       />
                     )}
@@ -1969,7 +2325,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                       Male ({sensationAnalytics.mildNegativeCount})
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
+                      <span
+                        className="h-2 w-2 rounded-full shrink-0"
+                        style={{ background: NEGATIVE_SPLIT_GRADIENT }}
+                        aria-hidden="true"
+                      />
                       Malissimo ({sensationAnalytics.negativeCount})
                     </span>
                   </div>
@@ -2029,16 +2389,6 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                               14,
                               Math.round((phrase.count / group.maxItemCount) * 100)
                             );
-                            const barColor =
-                              phrase.tone === 'very_positive'
-                                ? 'bg-sky-500'
-                                : phrase.tone === 'positive'
-                                  ? 'bg-sky-300'
-                                  : phrase.tone === 'middle'
-                                    ? 'bg-amber-400'
-                                    : phrase.tone === 'mild_negative'
-                                      ? 'bg-rose-300'
-                                      : 'bg-red-500';
                             const scoreLabel = COLOR_VALENCE_META[phrase.tone].scoreLabel;
 
                             return (
@@ -2053,8 +2403,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                                 </div>
                                 <div className="h-2 w-full rounded-full bg-[var(--app-divider)] overflow-hidden">
                                   <div
-                                    className={`h-full rounded-full ${barColor}`}
-                                    style={{ width: `${widthPct}%` }}
+                                    className="h-full rounded-full"
+                                    style={{
+                                      width: `${widthPct}%`,
+                                      background: getValenceBackground(phrase.tone),
+                                    }}
                                   />
                                 </div>
                               </div>

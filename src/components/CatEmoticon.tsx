@@ -1,9 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Loader2, Sparkles, X } from 'lucide-react';
 import {
-  CAT_EMOTICON_LIBRARY,
-  CAT_EMOTICON_MAP,
+  deleteCustomCatEmoticon,
+  getAllCatEmoticons,
+  getCatIconMeta,
+  getCustomCatEmoticonById,
+  requestCreateCustomCatIcon,
   resolveCatEmoticonId,
+  subscribeCatEmoticonLibrary,
   type CatEmoticonId,
+  type SafeSvgShape,
 } from '../utils/catEmoticonLibrary';
 import type { TodoBlockKey } from '../types/dailyTodo';
 
@@ -163,6 +169,26 @@ const MiniNekoHeadFull: React.FC<{ variant: 'happy' | 'love' | 'sleep' | 'sad' |
   </g>
 );
 
+const renderSafeShape = (shape: SafeSvgShape, idx: number) => {
+  const a = shape.attrs || {};
+  switch (shape.type) {
+    case 'path':
+      return <path key={idx} {...(a as React.SVGProps<SVGPathElement>)} />;
+    case 'circle':
+      return <circle key={idx} {...(a as React.SVGProps<SVGCircleElement>)} />;
+    case 'ellipse':
+      return <ellipse key={idx} {...(a as React.SVGProps<SVGEllipseElement>)} />;
+    case 'rect':
+      return <rect key={idx} {...(a as React.SVGProps<SVGRectElement>)} />;
+    case 'line':
+      return <line key={idx} {...(a as React.SVGProps<SVGLineElement>)} />;
+    case 'polygon':
+      return <polygon key={idx} {...(a as React.SVGProps<SVGPolygonElement>)} />;
+    default:
+      return null;
+  }
+};
+
 /**
  * Object-Prominent Neko Icon Renderer:
  * Objects, gear, tools, vehicles & clothing fill ~80% of the 36x36 viewBox
@@ -176,11 +202,32 @@ export const CatEmoticonIcon: React.FC<CatEmoticonIconProps> = ({
   title,
   variant = 'fullFace',
 }) => {
-  const resolvedId = resolveCatEmoticonId(emoticonId, text, blockHint);
-  const meta = CAT_EMOTICON_MAP[resolvedId];
+  const [libTick, setLibTick] = useState(0);
+  useEffect(() => subscribeCatEmoticonLibrary(() => setLibTick((t) => t + 1)), []);
+
+  const resolvedId = useMemo(
+    () => resolveCatEmoticonId(emoticonId, text, blockHint),
+    [emoticonId, text, blockHint, libTick]
+  );
+  const customDef = useMemo(() => getCustomCatEmoticonById(resolvedId), [resolvedId, libTick]);
+  const meta = useMemo(() => getCatIconMeta(resolvedId), [resolvedId, libTick]);
   const showBackdrop = variant === 'medallion';
 
   const renderObjectArtwork = () => {
+    if (customDef) {
+      return (
+        <g>
+          {customDef.nekoCorner === 'ears-top' && <NekoEarTop cx={18} y={7.5} w={6.5} h={3.6} />}
+          {customDef.shapes.map((shape, idx) => renderSafeShape(shape, idx))}
+          {customDef.nekoCorner === 'top-left' && <MiniPeekingNeko x={2} y={2} scale={0.82} />}
+          {customDef.nekoCorner === 'top-right' && <MiniPeekingNeko x={22} y={2} scale={0.82} />}
+          {(customDef.nekoCorner === 'bottom-right' || !customDef.nekoCorner) && (
+            <MiniPeekingNeko x={21.5} y={21.5} scale={0.84} />
+          )}
+        </g>
+      );
+    }
+
     switch (resolvedId) {
       case 'cat_bag':
         return (
@@ -923,6 +970,7 @@ interface CatEmoticonPickerProps {
   onResetAuto?: () => void;
   isAuto?: boolean;
   variant?: CatEmoticonVariant;
+  contextText?: string;
 }
 
 export const CatEmoticonPicker: React.FC<CatEmoticonPickerProps> = ({
@@ -931,44 +979,86 @@ export const CatEmoticonPicker: React.FC<CatEmoticonPickerProps> = ({
   onResetAuto,
   isAuto = false,
   variant = 'fullFace',
+  contextText = '',
 }) => {
   const [search, setSearch] = useState('');
+  const [libTick, setLibTick] = useState(0);
+  const [isCreating, setIsCreating] = useState(false);
+
+  useEffect(() => subscribeCatEmoticonLibrary(() => setLibTick((t) => t + 1)), []);
+
+  const allIcons = useMemo(() => getAllCatEmoticons(), [libTick]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return CAT_EMOTICON_LIBRARY;
-    return CAT_EMOTICON_LIBRARY.filter(
+    if (!q) return allIcons;
+    return allIcons.filter(
       (item) =>
-        item.label.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
+        item.label.toLowerCase().includes(q) ||
+        item.id.toLowerCase().includes(q) ||
+        item.customDef?.keywordTokens.some((k) => k.toLowerCase().includes(q))
     );
-  }, [search]);
+  }, [search, allIcons]);
+
+  const createPromptText = (search.trim() || contextText.trim()).slice(0, 60);
+
+  const handleCreateCustom = async () => {
+    if (!createPromptText || isCreating) return;
+    setIsCreating(true);
+    try {
+      const created = await requestCreateCustomCatIcon(createPromptText);
+      if (created) {
+        onSelect(created.id);
+      }
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-[var(--todo-card-border)] bg-[var(--todo-surface)] p-2.5 shadow-sm space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[11px] font-bold text-[var(--todo-text)]">
-          Scegli icona ({CAT_EMOTICON_LIBRARY.length})
+          Scegli icona ({allIcons.length})
         </span>
-        {onResetAuto && (
-          <button
-            type="button"
-            onClick={onResetAuto}
-            className={`rounded-lg border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
-              isAuto
-                ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
-                : 'border-[var(--todo-chip-border)] bg-[var(--todo-card)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)]'
-            }`}
-          >
-            Auto dal testo
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {createPromptText.length >= 2 && (
+            <button
+              type="button"
+              disabled={isCreating}
+              onClick={handleCreateCustom}
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-accent-soft)] px-2 py-0.5 text-[10px] font-semibold text-[var(--todo-text)] hover:opacity-85 disabled:opacity-50"
+              title={`Crea una nuova icona neko per "${createPromptText}"`}
+            >
+              {isCreating ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Sparkles className="h-2.5 w-2.5 text-[var(--todo-accent)]" aria-hidden="true" />
+              )}
+              <span>{isCreating ? 'Creo...' : 'Crea neko'}</span>
+            </button>
+          )}
+          {onResetAuto && (
+            <button
+              type="button"
+              onClick={onResetAuto}
+              className={`rounded-lg border px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                isAuto
+                  ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-dark)] text-white'
+                  : 'border-[var(--todo-chip-border)] bg-[var(--todo-card)] text-[var(--todo-text-muted)] hover:bg-[var(--todo-accent-soft)]'
+              }`}
+            >
+              Auto dal testo
+            </button>
+          )}
+        </div>
       </div>
 
       <input
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Cerca icona (es. benzina, pacco, pizza...)"
+        placeholder="Cerca o scrivi parola per creare icona neko..."
         className="w-full min-h-[28px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-card)] px-2 py-0.5 text-[11px] text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/65 focus:border-[var(--todo-accent)] focus:outline-none"
       />
 
@@ -976,27 +1066,42 @@ export const CatEmoticonPicker: React.FC<CatEmoticonPickerProps> = ({
         {filtered.map((item) => {
           const active = value === item.id;
           return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelect(item.id)}
-              title={item.label}
-              aria-label={item.label}
-              className={`flex flex-col items-center justify-center gap-0.5 rounded-xl border p-1 transition-all ${
-                active
-                  ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-1 ring-[var(--todo-accent)]'
-                  : 'border-[var(--todo-note-border)] bg-[var(--todo-card)] hover:border-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)]/50'
-              }`}
-            >
-              <CatEmoticonIcon
-                emoticonId={item.id}
-                variant={variant}
-                sizeClass="h-7 w-7"
-              />
-              <span className="text-[8.5px] leading-tight text-[var(--todo-text-muted)] truncate max-w-full">
-                {item.label.split('/')[0].split('&')[0].trim()}
-              </span>
-            </button>
+            <div key={item.id} className="relative group">
+              <button
+                type="button"
+                onClick={() => onSelect(item.id)}
+                title={item.label}
+                aria-label={item.label}
+                className={`w-full flex flex-col items-center justify-center gap-0.5 rounded-xl border p-1 transition-all ${
+                  active
+                    ? 'border-[var(--todo-accent-dark)] bg-[var(--todo-accent-soft)] ring-1 ring-[var(--todo-accent)]'
+                    : 'border-[var(--todo-note-border)] bg-[var(--todo-card)] hover:border-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)]/50'
+                }`}
+              >
+                <CatEmoticonIcon
+                  emoticonId={item.id}
+                  variant={variant}
+                  sizeClass="h-7 w-7"
+                />
+                <span className="text-[8.5px] leading-tight text-[var(--todo-text-muted)] truncate max-w-full">
+                  {item.label.split('/')[0].split('&')[0].trim()}
+                </span>
+              </button>
+              {item.isCustom && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteCustomCatEmoticon(item.id);
+                  }}
+                  aria-label={`Rimuovi icona personalizzata ${item.label}`}
+                  title="Rimuovi icona personalizzata"
+                  className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-stone-800 text-white hidden group-hover:flex items-center justify-center shadow"
+                >
+                  <X className="h-2.5 w-2.5" aria-hidden="true" />
+                </button>
+              )}
+            </div>
           );
         })}
       </div>

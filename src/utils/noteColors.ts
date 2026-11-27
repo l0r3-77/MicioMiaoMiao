@@ -154,6 +154,14 @@ export const COLOR_VALENCE_META: Record<
   },
 };
 
+export const NEGATIVE_SPLIT_GRADIENT =
+  'linear-gradient(90deg, #EF4444 0%, #EF4444 50%, #3F3F46 50%, #3F3F46 100%)';
+
+export function getValenceBackground(valence: ColorValence): string {
+  if (valence === 'negative') return NEGATIVE_SPLIT_GRADIENT;
+  return COLOR_VALENCE_META[valence].hex;
+}
+
 export function inferNoteColorFromText(text: string, bullets: string[] = []): NoteColor {
   const combined = `${text} ${bullets.join(' ')}`.toLowerCase();
 

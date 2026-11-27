@@ -359,7 +359,9 @@ export async function exportToPdf(scope: ExportScope, payload: ExportStatsPayloa
     if (payload.chartSvgContainers && payload.chartSvgContainers.length > 0) {
       for (const container of payload.chartSvgContainers) {
         if (!container.element) continue;
-        const svg = container.element.querySelector('svg');
+        const svg =
+          (container.element.querySelector('svg[data-export-chart="true"]') as SVGSVGElement | null) ||
+          (container.element.querySelector('svg') as SVGSVGElement | null);
         if (!svg) continue;
         const png = await svgElementToPngDataUrl(svg);
         if (!png) continue;

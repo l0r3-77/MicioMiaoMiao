@@ -1,6 +1,6 @@
 import type { TodoBlockKey } from '../types/dailyTodo';
 
-export type CatEmoticonId =
+export type BuiltinCatEmoticonId =
   | 'cat_note'
   | 'cat_fuel'
   | 'cat_barber'
@@ -61,11 +61,40 @@ export type CatEmoticonId =
   | 'cat_love'
   | 'cat_happy';
 
+export type CatEmoticonId = BuiltinCatEmoticonId | (string & {});
+
+export interface SafeSvgShape {
+  type: 'path' | 'circle' | 'ellipse' | 'rect' | 'line' | 'polygon';
+  attrs: Record<string, string | number>;
+}
+
+export interface CustomCatEmoticonDef {
+  id: string;
+  label: string;
+  accentColor: string;
+  keywordTokens: string[];
+  nekoCorner: 'bottom-right' | 'top-left' | 'top-right' | 'ears-top';
+  shapes: SafeSvgShape[];
+  createdAt: string;
+  isCustom: true;
+}
+
+export interface LearnedCatIconRule {
+  id: string;
+  phrase: string;
+  tokens: string[];
+  focusTokens: string[];
+  iconId: string;
+  updatedAt: string;
+}
+
 export interface CatEmoticonDef {
   id: CatEmoticonId;
   label: string;
   accentColor: string;
   keywords: RegExp;
+  isCustom?: boolean;
+  customDef?: CustomCatEmoticonDef;
 }
 
 export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
@@ -482,13 +511,13 @@ export const CAT_EMOTICON_LIBRARY: CatEmoticonDef[] = [
   },
 ];
 
-export const CAT_EMOTICON_MAP: Record<CatEmoticonId, CatEmoticonDef> =
+export const CAT_EMOTICON_MAP: Record<string, CatEmoticonDef> =
   CAT_EMOTICON_LIBRARY.reduce(
     (acc, item) => {
       acc[item.id] = item;
       return acc;
     },
-    {} as Record<CatEmoticonId, CatEmoticonDef>
+    {} as Record<string, CatEmoticonDef>
   );
 
 const LEGACY_EMOJI_TO_CAT: Record<string, CatEmoticonId> = {
@@ -655,14 +684,394 @@ const COMPOUND_PHRASE_RULES: Array<{ pattern: RegExp; id: CatEmoticonId }> = [
   },
 ];
 
+const CUSTOM_ICONS_STORAGE_KEY = 'agendavoce_custom_cat_icons_v1';
+const LEARNED_RULES_STORAGE_KEY = 'agendavoce_neko_learned_icons_v1';
+
+const libraryListeners = new Set<() => void>();
+let cachedCustomIcons: CustomCatEmoticonDef[] | null = null;
+let cachedLearnedRules: LearnedCatIconRule[] | null = null;
+
+function notifyLibraryListeners() {
+  for (const listener of libraryListeners) {
+    try {
+      listener();
+    } catch {
+      // ignore listener errors
+    }
+  }
+}
+
+export function subscribeCatEmoticonLibrary(listener: () => void): () => void {
+  libraryListeners.add(listener);
+  return () => {
+    libraryListeners.delete(listener);
+  };
+}
+
+const ITALIAN_NOISE_WORDS = new Set([
+  'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'dei', 'degli', 'delle',
+  'di', 'del', 'dello', 'della', 'a', 'al', 'allo', 'alla', 'da', 'dal', 'dallo',
+  'dalla', 'in', 'nel', 'nello', 'nella', 'con', 'su', 'sul', 'sulla', 'per', 'tra',
+  'fra', 'e', 'ed', 'o', 'od', 'ma', 'che', 'chi', 'cui', 'non', 'piu', 'poi',
+  'oggi', 'domani', 'ieri', 'dopo', 'prima', 'subito', 'ancora', 'sempre', 'adesso',
+  'ora', 'molto', 'poco', 'tanto', 'tutto', 'tutti', 'tutte', 'ogni', 'altro',
+  'altra', 'mio', 'mia', 'miei', 'mie', 'tuo', 'tua', 'suo', 'sua', 'questo',
+  'questa', 'questi', 'queste', 'quello', 'quella', 'devo', 'devi', 'deve',
+  'dobbiamo', 'bisogna', 'voglio', 'posso', 'fare', 'faccio', 'andare', 'vado',
+  'prendere', 'prendo', 'portare', 'porto', 'mettere', 'metto', 'avere', 'essere',
+  'stare', 'cosa', 'cose', 'nota', 'appunto', 'ricordare', 'ricordarmi',
+]);
+
+const GENERIC_ACTION_WORDS = new Set([
+  'comprare', 'compro', 'acquistare', 'pulire', 'pulisci', 'sistemare', 'sistemo',
+  'controllare', 'controllo', 'vedere', 'vedo', 'cercare', 'cerco', 'trovare',
+  'preparare', 'preparo', 'cambiare', 'cambio', 'aprire', 'chiudere', 'finire',
+  'iniziare', 'usare', 'usare', 'chiedere', 'ritirare', 'ordinare', 'pagare',
+  'mandare', 'inviare', 'chiamare', 'scrivere',
+]);
+
+function normalizeTextForTokens(text: string): string {
+  return (text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’`\-_/.,:;!?()[\]{}"«»]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stemItalianBasic(token: string): string {
+  if (token.length >= 6 && (token.endsWith('trice') || token.endsWith('trici'))) {
+    return token.slice(0, -5);
+  }
+  if (token.length >= 6 && (token.endsWith('zione') || token.endsWith('zioni'))) {
+    return token.slice(0, -5);
+  }
+  if (token.length >= 5 && /[aeio]$/.test(token)) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+export function extractSignificantTokens(text: string): {
+  phrase: string;
+  tokens: string[];
+  focusTokens: string[];
+} {
+  const phrase = normalizeTextForTokens(text);
+  if (!phrase) return { phrase: '', tokens: [], focusTokens: [] };
+
+  const rawWords = phrase.split(' ').filter((w) => w.length >= 3);
+  const tokens = Array.from(
+    new Set(rawWords.filter((w) => !ITALIAN_NOISE_WORDS.has(w)))
+  ).slice(0, 8);
+
+  const nonGeneric = tokens.filter((w) => !GENERIC_ACTION_WORDS.has(w));
+  const focusTokens = nonGeneric.length > 0 ? nonGeneric : tokens;
+  return { phrase, tokens, focusTokens };
+}
+
+function tokensMatchFuzzy(ruleToken: string, candidateTokens: string[], candidatePhrase: string): boolean {
+  if (!ruleToken || ruleToken.length < 3) return false;
+  if (candidateTokens.includes(ruleToken)) return true;
+  if (candidatePhrase.includes(` ${ruleToken} `) || candidatePhrase === ruleToken) return true;
+  const rStem = stemItalianBasic(ruleToken);
+  if (rStem.length < 4) return false;
+  for (const cand of candidateTokens) {
+    if (cand === ruleToken) return true;
+    const cStem = stemItalianBasic(cand);
+    if (cStem === rStem) return true;
+    if (rStem.length >= 5 && (cand.startsWith(rStem) || ruleToken.startsWith(cStem))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function getCustomCatEmoticons(): CustomCatEmoticonDef[] {
+  if (cachedCustomIcons) return cachedCustomIcons;
+  try {
+    const raw = localStorage.getItem(CUSTOM_ICONS_STORAGE_KEY);
+    if (!raw) {
+      cachedCustomIcons = [];
+      return cachedCustomIcons;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      cachedCustomIcons = [];
+      return cachedCustomIcons;
+    }
+    cachedCustomIcons = parsed.filter(
+      (x): x is CustomCatEmoticonDef =>
+        Boolean(x && typeof x.id === 'string' && typeof x.label === 'string' && Array.isArray(x.shapes))
+    );
+    return cachedCustomIcons;
+  } catch {
+    cachedCustomIcons = [];
+    return cachedCustomIcons;
+  }
+}
+
+export function getCustomCatEmoticonById(id?: string | null): CustomCatEmoticonDef | null {
+  if (!id) return null;
+  return getCustomCatEmoticons().find((c) => c.id === id) || null;
+}
+
+export function saveCustomCatEmoticon(def: CustomCatEmoticonDef): CustomCatEmoticonDef {
+  const existing = getCustomCatEmoticons();
+  const normalizedLabel = normalizeTextForTokens(def.label);
+  const dupByLabel = existing.find(
+    (c) => normalizeTextForTokens(c.label) === normalizedLabel
+  );
+  if (dupByLabel) {
+    const mergedTokens = Array.from(new Set([...dupByLabel.keywordTokens, ...def.keywordTokens]));
+    const updated: CustomCatEmoticonDef = {
+      ...dupByLabel,
+      keywordTokens: mergedTokens,
+    };
+    const next = [updated, ...existing.filter((c) => c.id !== dupByLabel.id)].slice(0, 120);
+    cachedCustomIcons = next;
+    try {
+      localStorage.setItem(CUSTOM_ICONS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore storage errors
+    }
+    notifyLibraryListeners();
+    return updated;
+  }
+
+  const next = [def, ...existing.filter((c) => c.id !== def.id)].slice(0, 120);
+  cachedCustomIcons = next;
+  try {
+    localStorage.setItem(CUSTOM_ICONS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage errors
+  }
+  notifyLibraryListeners();
+  return def;
+}
+
+export function deleteCustomCatEmoticon(id: string): void {
+  const existing = getCustomCatEmoticons();
+  const next = existing.filter((c) => c.id !== id);
+  cachedCustomIcons = next;
+  try {
+    localStorage.setItem(CUSTOM_ICONS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+  // Clean learned rules pointing to deleted icon
+  const rules = getLearnedCatIconRules().filter((r) => r.iconId !== id);
+  cachedLearnedRules = rules;
+  try {
+    localStorage.setItem(LEARNED_RULES_STORAGE_KEY, JSON.stringify(rules));
+  } catch {
+    // ignore
+  }
+  notifyLibraryListeners();
+}
+
+export function getAllCatEmoticons(): CatEmoticonDef[] {
+  const custom = getCustomCatEmoticons().map((c): CatEmoticonDef => ({
+    id: c.id,
+    label: c.label,
+    accentColor: c.accentColor || '#C4B5FD',
+    keywords: new RegExp(
+      c.keywordTokens.length > 0
+        ? `\\b(${c.keywordTokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\w*\\b`
+        : '$^',
+      'i'
+    ),
+    isCustom: true,
+    customDef: c,
+  }));
+  return [...custom, ...CAT_EMOTICON_LIBRARY];
+}
+
+export function getCatIconMeta(id?: string | null): CatEmoticonDef {
+  if (id && id in CAT_EMOTICON_MAP) {
+    return CAT_EMOTICON_MAP[id];
+  }
+  const custom = getCustomCatEmoticonById(id);
+  if (custom) {
+    return {
+      id: custom.id,
+      label: custom.label,
+      accentColor: custom.accentColor || '#C4B5FD',
+      keywords: /$^/,
+      isCustom: true,
+      customDef: custom,
+    };
+  }
+  return CAT_EMOTICON_MAP.cat_note;
+}
+
+export function getLearnedCatIconRules(): LearnedCatIconRule[] {
+  if (cachedLearnedRules) return cachedLearnedRules;
+  try {
+    const raw = localStorage.getItem(LEARNED_RULES_STORAGE_KEY);
+    if (!raw) {
+      cachedLearnedRules = [];
+      return cachedLearnedRules;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      cachedLearnedRules = [];
+      return cachedLearnedRules;
+    }
+    cachedLearnedRules = parsed.filter(
+      (r): r is LearnedCatIconRule =>
+        Boolean(r && typeof r.iconId === 'string' && Array.isArray(r.tokens))
+    );
+    return cachedLearnedRules;
+  } catch {
+    cachedLearnedRules = [];
+    return cachedLearnedRules;
+  }
+}
+
+function isValidKnownIconId(iconId?: string | null): iconId is CatEmoticonId {
+  if (!iconId || typeof iconId !== 'string') return false;
+  return iconId in CAT_EMOTICON_MAP || Boolean(getCustomCatEmoticonById(iconId));
+}
+
+export function learnCatIconAssociation(noteText: string, chosenIconId: string): void {
+  const { phrase, tokens, focusTokens } = extractSignificantTokens(noteText);
+  if (!phrase || tokens.length === 0 || !isValidKnownIconId(chosenIconId)) return;
+
+  const existing = getLearnedCatIconRules();
+  const tokenSig = [...tokens].sort().join('|');
+  const nowIso = new Date().toISOString();
+
+  const updatedRule: LearnedCatIconRule = {
+    id: `learn_${Date.now().toString(36)}`,
+    phrase,
+    tokens,
+    focusTokens,
+    iconId: chosenIconId,
+    updatedAt: nowIso,
+  };
+
+  // Replace rule with same phrase or same exact token set; if user assigned to a single focus token, update that single-token rule too
+  const filtered = existing.filter((r) => {
+    if (r.phrase === phrase) return false;
+    if ([...r.tokens].sort().join('|') === tokenSig) return false;
+    if (focusTokens.length === 1 && r.focusTokens.length === 1 && r.focusTokens[0] === focusTokens[0]) {
+      return false;
+    }
+    return true;
+  });
+
+  const next = [updatedRule, ...filtered].slice(0, 220);
+  cachedLearnedRules = next;
+  try {
+    localStorage.setItem(LEARNED_RULES_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+  notifyLibraryListeners();
+}
+
+export function findLearnedIconForText(text: string): CatEmoticonId | null {
+  const { phrase, tokens, focusTokens } = extractSignificantTokens(text);
+  if (!phrase) return null;
+
+  const rules = getLearnedCatIconRules();
+  if (rules.length === 0) return null;
+
+  let bestRule: { iconId: string; score: number } | null = null;
+
+  for (let idx = 0; idx < rules.length; idx++) {
+    const rule = rules[idx];
+    if (!isValidKnownIconId(rule.iconId)) continue;
+    const recencyBonus = Math.max(0, 50 - idx * 0.2);
+
+    if (rule.phrase && rule.phrase === phrase) {
+      return rule.iconId;
+    }
+
+    if (rule.tokens.length > 0) {
+      const allMatched = rule.tokens.every((rt) => tokensMatchFuzzy(rt, tokens, phrase));
+      if (allMatched) {
+        const score = 600 + rule.tokens.length * 40 + recencyBonus;
+        if (!bestRule || score > bestRule.score) {
+          bestRule = { iconId: rule.iconId, score };
+        }
+        continue;
+      }
+    }
+
+    const rFocus = rule.focusTokens?.length ? rule.focusTokens : rule.tokens;
+    if (rFocus.length > 0 && rFocus.length <= 2) {
+      const focusHits = rFocus.filter((rt) =>
+        tokensMatchFuzzy(rt, focusTokens.length ? focusTokens : tokens, phrase)
+      );
+      if (focusHits.length === rFocus.length) {
+        const score = 420 + focusHits.length * 30 + recencyBonus;
+        if (!bestRule || score > bestRule.score) {
+          bestRule = { iconId: rule.iconId, score };
+        }
+      } else if (
+        rFocus.length <= 2 &&
+        focusHits.length === 1 &&
+        focusHits[0].length >= 5
+      ) {
+        const score = 220 + focusHits[0].length + recencyBonus;
+        if (!bestRule || score > bestRule.score) {
+          bestRule = { iconId: rule.iconId, score };
+        }
+      }
+    }
+  }
+
+  return bestRule ? bestRule.iconId : null;
+}
+
+export function findCustomIconForText(text: string): CustomCatEmoticonDef | null {
+  const { phrase, tokens, focusTokens } = extractSignificantTokens(text);
+  if (!phrase) return null;
+
+  const customs = getCustomCatEmoticons();
+  if (customs.length === 0) return null;
+
+  let bestMatch: { def: CustomCatEmoticonDef; score: number } | null = null;
+  for (const def of customs) {
+    const kws = def.keywordTokens.map((k) => normalizeTextForTokens(k)).filter((k) => k.length >= 3);
+    if (kws.length === 0) continue;
+    const candidatePool = focusTokens.length > 0 ? focusTokens : tokens;
+    let hits = 0;
+    for (const kw of kws) {
+      if (tokensMatchFuzzy(kw, candidatePool, phrase)) {
+        hits++;
+      }
+    }
+    if (hits > 0) {
+      const score = hits * 50 + (normalizeTextForTokens(def.label) === phrase ? 100 : 0);
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = { def, score };
+      }
+    }
+  }
+  return bestMatch ? bestMatch.def : null;
+}
+
 export function isCatEmoticonId(val?: string | null): val is CatEmoticonId {
-  return typeof val === 'string' && val in CAT_EMOTICON_MAP;
+  return isValidKnownIconId(val);
 }
 
 export function inferSpecificCatEmoticonId(text: string): CatEmoticonId | null {
   const clean = (text || '').trim();
   if (!clean) return null;
 
+  // 1. User's manually learned associations ALWAYS take highest priority
+  const learned = findLearnedIconForText(clean);
+  if (learned) return learned;
+
+  // 2. Saved custom neko icons generated specifically for user's topics
+  const customMatch = findCustomIconForText(clean);
+  if (customMatch) return customMatch.id;
+
+  // 3. Built-in compound phrases & object specificity order
   for (const rule of COMPOUND_PHRASE_RULES) {
     if (rule.pattern.test(clean)) {
       return rule.id;
@@ -676,6 +1085,14 @@ export function inferSpecificCatEmoticonId(text: string): CatEmoticonId | null {
   }
 
   return null;
+}
+
+export function shouldCreateCustomNekoIcon(text: string): boolean {
+  const clean = (text || '').trim();
+  if (clean.length < 3) return false;
+  if (inferSpecificCatEmoticonId(clean)) return false;
+  const { focusTokens } = extractSignificantTokens(clean);
+  return focusTokens.some((t) => t.length >= 3);
 }
 
 export function inferCatEmoticonId(
@@ -692,9 +1109,8 @@ export function inferCatEmoticonId(
 
 /**
  * Used on auto-generated AI results (transcribe-todo / parse-batch-todos):
- * if the text clearly contains an explicit high-specificity object/phrase keyword
- * (e.g. lavatrice, pulisci casa, borsa), prefer the exact matched icon over a
- * looser AI guess, while preserving AI selection when no explicit keyword matched.
+ * 1. Check learned manual associations, custom generated icons, and built-in keyword rules first.
+ * 2. Preserve valid AI selection if no explicit local rule matched.
  */
 export function reconcileAutoCatEmoticonId(
   aiEmoji: string | undefined,
@@ -720,5 +1136,60 @@ export function resolveCatEmoticonId(
     return LEGACY_EMOJI_TO_CAT[storedEmoji];
   }
   return inferCatEmoticonId(text, blockHint);
+}
+
+export async function requestCreateCustomCatIcon(
+  text: string
+): Promise<CustomCatEmoticonDef | null> {
+  const clean = (text || '').trim();
+  if (clean.length < 2) return null;
+
+  try {
+    const resp = await fetch('/api/notes/create-cat-icon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: clean }),
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      icon?: Partial<CustomCatEmoticonDef>;
+    };
+    if (!data?.icon || !Array.isArray(data.icon.shapes) || data.icon.shapes.length === 0) {
+      return null;
+    }
+    const { focusTokens, tokens } = extractSignificantTokens(clean);
+    const serverKw = Array.isArray(data.icon.keywordTokens)
+      ? data.icon.keywordTokens.map((k) => normalizeTextForTokens(String(k))).filter((k) => k.length >= 3)
+      : [];
+    const mergedKeywords = Array.from(
+      new Set([...serverKw, ...(focusTokens.length > 0 ? focusTokens : tokens)])
+    ).slice(0, 8);
+
+    const newDef: CustomCatEmoticonDef = {
+      id:
+        typeof data.icon.id === 'string' && data.icon.id.startsWith('custom_')
+          ? data.icon.id
+          : `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      label: String(data.icon.label || clean.slice(0, 22)).trim().slice(0, 28),
+      accentColor:
+        typeof data.icon.accentColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(data.icon.accentColor)
+          ? data.icon.accentColor
+          : '#A78BFA',
+      keywordTokens: mergedKeywords,
+      nekoCorner:
+        data.icon.nekoCorner === 'top-left' ||
+        data.icon.nekoCorner === 'top-right' ||
+        data.icon.nekoCorner === 'ears-top'
+          ? data.icon.nekoCorner
+          : 'bottom-right',
+      shapes: data.icon.shapes,
+      createdAt: new Date().toISOString(),
+      isCustom: true,
+    };
+
+    return saveCustomCatEmoticon(newDef);
+  } catch {
+    return null;
+  }
 }
 

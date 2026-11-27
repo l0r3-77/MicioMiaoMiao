@@ -1115,7 +1115,7 @@ export default function App() {
     if (
       !target ||
       target.closest(
-        'input, textarea, select, [contenteditable="true"], [draggable="true"], [data-todo-merge-id], [data-org-merge-id], [data-org-insert-before], [data-todo-insert-before], .touch-none, [role="dialog"]'
+        'input, textarea, select, [contenteditable="true"], [draggable="true"], [data-todo-item-id], [data-org-item-id], [data-org-insert-before], [data-todo-insert-before], .touch-none, [role="dialog"]'
       )
     ) {
       swipeStartRef.current = null;

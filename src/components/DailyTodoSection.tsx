@@ -102,8 +102,12 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     onSetTodoItems((prev) => [...prev, ...items]);
   };
 
-  const handleUpdateTodo = (id: string, patch: Partial<TodoNoteItem>) => {
-    pushTodoUndo();
+  const handleUpdateTodo = (
+    id: string,
+    patch: Partial<TodoNoteItem>,
+    options?: { skipUndo?: boolean }
+  ) => {
+    if (!options?.skipUndo) pushTodoUndo();
     onSetTodoItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
@@ -164,49 +168,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     });
   };
 
-  const handleMergeTodos = (sourceId: string, targetId: string) => {
-    if (!sourceId || !targetId || sourceId === targetId) return;
-    pushTodoUndo();
-    const nowIso = new Date().toISOString();
-    onSetTodoItems((prev) => {
-      const source = prev.find((i) => i.id === sourceId);
-      const target = prev.find((i) => i.id === targetId);
-      if (!source || !target) return prev;
-
-      const sText = source.text.trim();
-      const tText = target.text.trim();
-      const mergedText =
-        !sText || tText.toLowerCase() === sText.toLowerCase()
-          ? tText || sText
-          : `${tText} · ${sText}`;
-
-      const withoutSource = prev
-        .filter((i) => i.id !== sourceId)
-        .map((i) =>
-          i.id === targetId
-            ? {
-                ...i,
-                text: mergedText,
-                done: i.done && source.done,
-                updatedAt: nowIso,
-              }
-            : i
-        );
-
-      const affectedBlocks = new Set<TodoBlockKey>([source.block, target.block]);
-      const untouched = withoutSource.filter((i) => !affectedBlocks.has(i.block));
-      const reindexed: TodoNoteItem[] = [];
-      for (const blk of affectedBlocks) {
-        const list = withoutSource
-          .filter((i) => i.block === blk)
-          .sort((a, b) => a.order - b.order)
-          .map((item, idx) => ({ ...item, order: idx }));
-        reindexed.push(...list);
-      }
-      return [...untouched, ...reindexed];
-    });
-    onNotify('Note unite in «Da Fare»');
-  };
 
   const handleMoveTodoStep = (id: string, delta: -1 | 1) => {
     pushTodoUndo();
@@ -243,8 +204,12 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     onSetOrganizeItems((prev) => [...prev, ...items]);
   };
 
-  const handleUpdateOrganizeItem = (id: string, patch: Partial<OrganizeNoteItem>) => {
-    pushOrganizeUndo();
+  const handleUpdateOrganizeItem = (
+    id: string,
+    patch: Partial<OrganizeNoteItem>,
+    options?: { skipUndo?: boolean }
+  ) => {
+    if (!options?.skipUndo) pushOrganizeUndo();
     onSetOrganizeItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
     );
@@ -296,63 +261,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
     });
   };
 
-  const handleMergeOrganizeItems = (sourceId: string, targetId: string) => {
-    if (!sourceId || !targetId || sourceId === targetId) return;
-    pushOrganizeUndo();
-    const nowIso = new Date().toISOString();
-    onSetOrganizeItems((prev) => {
-      const source = prev.find((i) => i.id === sourceId);
-      const target = prev.find((i) => i.id === targetId);
-      if (!source || !target) return prev;
-
-      const sText = source.text.trim();
-      const tText = target.text.trim();
-      const mergedText =
-        !sText || tText.toLowerCase() === sText.toLowerCase()
-          ? tText || sText
-          : `${tText} · ${sText}`;
-
-      const keepReminder =
-        target.reminderDate && target.reminderTime
-          ? { reminderDate: target.reminderDate, reminderTime: target.reminderTime }
-          : source.reminderDate && source.reminderTime
-            ? { reminderDate: source.reminderDate, reminderTime: source.reminderTime }
-            : {};
-
-      const withoutSource = prev
-        .filter((i) => i.id !== sourceId)
-        .map((i) =>
-          i.id === targetId
-            ? {
-                ...i,
-                text: mergedText,
-                done: i.done && source.done,
-                ...keepReminder,
-                updatedAt: nowIso,
-              }
-            : i
-        );
-
-      const affectedKeys = new Set([
-        `${source.date}|${source.phase}`,
-        `${target.date}|${target.phase}`,
-      ]);
-      const untouched = withoutSource.filter(
-        (i) => !affectedKeys.has(`${i.date}|${i.phase}`)
-      );
-      const reindexed: OrganizeNoteItem[] = [];
-      for (const key of affectedKeys) {
-        const [d, p] = key.split('|');
-        const list = withoutSource
-          .filter((i) => i.date === d && i.phase === p)
-          .sort((a, b) => a.order - b.order)
-          .map((item, idx) => ({ ...item, order: idx }));
-        reindexed.push(...list);
-      }
-      return [...untouched, ...reindexed];
-    });
-    onNotify('Note unite in «Organizza»');
-  };
 
   const handleMoveOrganizeStep = (id: string, delta: -1 | 1) => {
     pushOrganizeUndo();
@@ -503,7 +411,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           onUpdateTodo={handleUpdateTodo}
           onDeleteTodo={handleDeleteTodo}
           onMoveOrReorderTodo={handleMoveOrReorderTodo}
-          onMergeTodos={handleMergeTodos}
           onMoveTodoStep={handleMoveTodoStep}
           onSendTodoToOrganize={handleSendTodoToOrganize}
           onDuplicateTodoToOrganize={handleDuplicateToOrganize}
@@ -525,7 +432,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           onUpdateOrganizeItem={handleUpdateOrganizeItem}
           onDeleteOrganizeItem={handleDeleteOrganizeItem}
           onMoveOrReorderOrganizeItem={handleMoveOrReorderOrganizeItem}
-          onMergeOrganizeItems={handleMergeOrganizeItems}
           onMoveOrganizeStep={handleMoveOrganizeStep}
           onPickTodoForOrganize={handleSendTodoToOrganize}
           onDuplicateOrganizeItem={handleDuplicateToOrganize}

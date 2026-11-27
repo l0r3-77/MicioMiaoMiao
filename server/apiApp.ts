@@ -1860,6 +1860,296 @@ ${numberedLines.slice(0, 6000)}
     }
   });
 
+  app.post('/api/notes/create-cat-icon', async (req, res) => {
+    const { text } = req.body as { text?: string };
+    const clean = typeof text === 'string' ? text.trim().slice(0, 180) : '';
+    if (!clean || clean.length < 2) {
+      return res.status(400).json({ error: 'Inserisci almeno una parola per creare l’icona.' });
+    }
+
+    const clampCoord = (val: unknown, min = -2, max = 38): number | null => {
+      const n = Number(val);
+      if (!Number.isFinite(n)) return null;
+      return Math.round(Math.max(min, Math.min(max, n)) * 100) / 100;
+    };
+
+    const sanitizeColor = (val: unknown, fallback = 'none'): string => {
+      if (typeof val !== 'string') return fallback;
+      const t = val.trim();
+      if (t === 'none') return 'none';
+      if (/^#[0-9A-Fa-f]{6}$/.test(t) || /^#[0-9A-Fa-f]{3}$/.test(t)) return t;
+      return fallback;
+    };
+
+    const sanitizeShape = (
+      raw: Record<string, unknown>
+    ): { type: 'path' | 'circle' | 'ellipse' | 'rect' | 'line' | 'polygon'; attrs: Record<string, string | number> } | null => {
+      const kind = typeof raw?.type === 'string' ? raw.type.trim() : '';
+      const fill = sanitizeColor(raw?.fill, 'none');
+      const stroke = sanitizeColor(raw?.stroke, 'none');
+      const sw = raw?.strokeWidth != null ? Math.max(0.4, Math.min(4.5, Number(raw.strokeWidth) || 1.4)) : undefined;
+      const common: Record<string, string | number> = {};
+      if (fill !== 'none' || kind !== 'line') common.fill = fill;
+      if (stroke !== 'none') common.stroke = stroke;
+      if (sw !== undefined && stroke !== 'none') common.strokeWidth = sw;
+      if (raw?.strokeLinecap === 'round' || raw?.strokeLinecap === 'square') {
+        common.strokeLinecap = raw.strokeLinecap;
+      }
+      if (raw?.strokeLinejoin === 'round' || raw?.strokeLinejoin === 'bevel') {
+        common.strokeLinejoin = raw.strokeLinejoin;
+      }
+
+      if (kind === 'path' && typeof raw.d === 'string') {
+        const d = raw.d.trim();
+        if (d.length > 0 && d.length <= 500 && /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s-]+$/.test(d)) {
+          return { type: 'path', attrs: { d, ...common } };
+        }
+        return null;
+      }
+      if (kind === 'circle') {
+        const cx = clampCoord(raw.cx);
+        const cy = clampCoord(raw.cy);
+        const r = clampCoord(raw.r, 0.4, 18);
+        if (cx !== null && cy !== null && r !== null) {
+          return { type: 'circle', attrs: { cx, cy, r, ...common } };
+        }
+        return null;
+      }
+      if (kind === 'ellipse') {
+        const cx = clampCoord(raw.cx);
+        const cy = clampCoord(raw.cy);
+        const rx = clampCoord(raw.rx, 0.4, 18);
+        const ry = clampCoord(raw.ry, 0.4, 18);
+        if (cx !== null && cy !== null && rx !== null && ry !== null) {
+          return { type: 'ellipse', attrs: { cx, cy, rx, ry, ...common } };
+        }
+        return null;
+      }
+      if (kind === 'rect') {
+        const x = clampCoord(raw.x);
+        const y = clampCoord(raw.y);
+        const width = clampCoord(raw.width, 0.5, 34);
+        const height = clampCoord(raw.height, 0.5, 34);
+        const rx = raw.rx != null ? clampCoord(raw.rx, 0, 12) : null;
+        if (x !== null && y !== null && width !== null && height !== null) {
+          return {
+            type: 'rect',
+            attrs: { x, y, width, height, ...(rx !== null ? { rx } : {}), ...common },
+          };
+        }
+        return null;
+      }
+      if (kind === 'line') {
+        const x1 = clampCoord(raw.x1);
+        const y1 = clampCoord(raw.y1);
+        const x2 = clampCoord(raw.x2);
+        const y2 = clampCoord(raw.y2);
+        if (x1 !== null && y1 !== null && x2 !== null && y2 !== null) {
+          return {
+            type: 'line',
+            attrs: {
+              x1,
+              y1,
+              x2,
+              y2,
+              stroke: stroke !== 'none' ? stroke : '#1E1B24',
+              strokeWidth: sw ?? 1.6,
+              strokeLinecap: 'round',
+            },
+          };
+        }
+        return null;
+      }
+      if (kind === 'polygon' && typeof raw.points === 'string') {
+        const pts = raw.points.trim();
+        if (pts.length > 0 && pts.length <= 240 && /^[0-9.,\s-]+$/.test(pts)) {
+          return { type: 'polygon', attrs: { points: pts, ...common } };
+        }
+        return null;
+      }
+      return null;
+    };
+
+    const buildProceduralFallbackIcon = () => {
+      const palette = ['#60A5FA', '#F472B6', '#34D399', '#FBBF24', '#A78BFA', '#FB923C'];
+      let hash = 0;
+      for (let i = 0; i < clean.length; i++) {
+        hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+      }
+      const accent = palette[hash % palette.length];
+      const tokens = clean
+        .toLowerCase()
+        .replace(/[^a-zàèéìòù0-9\s]/gi, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3)
+        .slice(0, 5);
+      const label = (tokens[0] || clean.slice(0, 16)).replace(/^./, (c) => c.toUpperCase());
+      return {
+        id: `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        label,
+        accentColor: accent,
+        keywordTokens: tokens,
+        nekoCorner: 'bottom-right' as const,
+        shapes: [
+          { type: 'rect' as const, attrs: { x: 6, y: 6, width: 24, height: 24, rx: 6, fill: accent, stroke: '#1E1B24', strokeWidth: 1.5 } },
+          { type: 'circle' as const, attrs: { cx: 18, cy: 17, r: 6.5, fill: '#FFFFFF', stroke: '#1E1B24', strokeWidth: 1.2 } },
+          { type: 'path' as const, attrs: { d: 'M14.5 17 L17 19.5 L22 14.5', fill: 'none', stroke: '#1E1B24', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' } },
+        ],
+      };
+    };
+
+    try {
+      const attempts = getHealthyModelAttempts(15000);
+      if (attempts.length === 0) {
+        return res.json({ icon: buildProceduralFallbackIcon(), usedFallback: true, quota: getPublicQuotaSnapshot() });
+      }
+
+      const ai = getGeminiClient();
+      for (const cfg of attempts) {
+        try {
+          const response = await callWithTimeout(
+            () =>
+              ai.models.generateContent({
+                model: cfg.model,
+                contents: `Crea un'icona SVG vettoriale kawaii in stile "gatto neko" per questo appunto: "${clean}".
+L'icona sarà disegnata su viewBox="0 0 36 36" con al massimo 7 forme geometriche semplici (rect, circle, ellipse, path, line, polygon).
+REGOLE VISIVE:
+1. L'oggetto, strumento, vestito, animale o concetto principale del testo DEVE essere grande, ben riconoscibile ed evidente (~70-85% del viewBox tra coordinate x:4..32, y:4..32).
+2. Usa contorni nitidi (#1E1B24, strokeWidth 1.3-1.8) e colori allegri saturi/pastello (es. #38BDF8, #F472B6, #FBBF24, #34D399, #A78BFA, #FB923C, #EF4444, #FFFFFF).
+3. Non disegnare tu il gattino piccolo d'angolo: verrà aggiunto automaticamente da "nekoCorner" ("bottom-right", "top-left", "top-right" oppure "ears-top"). Scegli il "nekoCorner" che non copre i dettagli principali dell'oggetto.
+4. "label": nome breve in italiano (1-3 parole, es. "Chitarra", "Aspirapolvere", "Passaporto").
+5. "keywordTokens": 2-5 parole chiave italiane significative ricavate dal testo (minuscolo).`,
+                config: {
+                  ...(cfg.thinkingLevel ? { thinkingConfig: { thinkingLevel: cfg.thinkingLevel } } : {}),
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      label: { type: Type.STRING },
+                      accentColor: { type: Type.STRING },
+                      keywordTokens: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
+                      nekoCorner: {
+                        type: Type.STRING,
+                        enum: ['bottom-right', 'top-left', 'top-right', 'ears-top'],
+                      },
+                      shapes: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            type: {
+                              type: Type.STRING,
+                              enum: ['path', 'circle', 'ellipse', 'rect', 'line', 'polygon'],
+                            },
+                            d: { type: Type.STRING },
+                            cx: { type: Type.NUMBER },
+                            cy: { type: Type.NUMBER },
+                            r: { type: Type.NUMBER },
+                            rx: { type: Type.NUMBER },
+                            ry: { type: Type.NUMBER },
+                            x: { type: Type.NUMBER },
+                            y: { type: Type.NUMBER },
+                            width: { type: Type.NUMBER },
+                            height: { type: Type.NUMBER },
+                            x1: { type: Type.NUMBER },
+                            y1: { type: Type.NUMBER },
+                            x2: { type: Type.NUMBER },
+                            y2: { type: Type.NUMBER },
+                            points: { type: Type.STRING },
+                            fill: { type: Type.STRING },
+                            stroke: { type: Type.STRING },
+                            strokeWidth: { type: Type.NUMBER },
+                            strokeLinecap: { type: Type.STRING },
+                            strokeLinejoin: { type: Type.STRING },
+                          },
+                          required: ['type'],
+                        },
+                      },
+                    },
+                    required: ['label', 'accentColor', 'keywordTokens', 'nekoCorner', 'shapes'],
+                  },
+                },
+              }),
+            cfg.timeoutMs
+          );
+
+          const parsed =
+            parseGeminiJson<{
+              label?: unknown;
+              accentColor?: unknown;
+              keywordTokens?: unknown;
+              nekoCorner?: unknown;
+              shapes?: unknown;
+            }>(response.text ?? '{}') || {};
+
+          const rawShapes = Array.isArray(parsed.shapes) ? parsed.shapes.slice(0, 10) : [];
+          const cleanShapes = rawShapes
+            .map((s) => (s && typeof s === 'object' ? sanitizeShape(s as Record<string, unknown>) : null))
+            .filter((s): s is NonNullable<typeof s> => s !== null);
+
+          if (cleanShapes.length === 0) {
+            continue;
+          }
+
+          const keywordTokens = Array.isArray(parsed.keywordTokens)
+            ? parsed.keywordTokens
+                .map((k) => String(k || '').toLowerCase().trim())
+                .filter((k) => k.length >= 3)
+                .slice(0, 6)
+            : [];
+
+          const nekoCorner =
+            parsed.nekoCorner === 'top-left' ||
+            parsed.nekoCorner === 'top-right' ||
+            parsed.nekoCorner === 'ears-top'
+              ? parsed.nekoCorner
+              : 'bottom-right';
+
+          recordSuccessfulGeminiUsage();
+          return res.json({
+            icon: {
+              id: `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+              label:
+                typeof parsed.label === 'string' && parsed.label.trim()
+                  ? parsed.label.trim().slice(0, 28)
+                  : clean.slice(0, 22),
+              accentColor: sanitizeColor(parsed.accentColor, '#A78BFA'),
+              keywordTokens,
+              nekoCorner,
+              shapes: cleanShapes,
+            },
+            usedFallback: false,
+            quota: getPublicQuotaSnapshot(),
+          });
+        } catch (err) {
+          if ((err as { status?: number })?.status === 429) {
+            markModelQuotaExhausted(cfg.model, err);
+          } else if (isTransientServiceError(err)) {
+            markModelTransientUnavailable(cfg.model);
+          } else if (isModelNotFoundError(err)) {
+            unsupportedModels.add(cfg.model);
+          }
+          if (!isFailoverEligibleError(err)) break;
+        }
+      }
+
+      return res.json({
+        icon: buildProceduralFallbackIcon(),
+        usedFallback: true,
+        quota: getPublicQuotaSnapshot(),
+      });
+    } catch {
+      return res.json({
+        icon: buildProceduralFallbackIcon(),
+        usedFallback: true,
+        quota: getPublicQuotaSnapshot(),
+      });
+    }
+  });
+
   app.use('/api', (req, res) => {
     const traceId = resolveTraceId(req);
     const meta = buildSanitizedReqMeta(req);
