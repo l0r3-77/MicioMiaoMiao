@@ -5,6 +5,7 @@ import type { DailyNote, NoteEntry } from '../types/note';
 import { resolveCatEmoticonId, type CatEmoticonId } from './catEmoticonLibrary';
 import { DAY_PHASE_MAP, DAY_PHASES } from './dailyTodoStorage';
 import {
+  compareExtendedDayTimes,
   formatItalianDateLong,
   formatItalianDateShort,
   formatItalianWeekdayShort,
@@ -83,7 +84,7 @@ export function buildOrganizeExportData(
     for (const dn of dailyNotes) {
       diaryByDate.set(
         dn.date,
-        [...dn.entries].sort((a, b) => a.time.localeCompare(b.time))
+        [...dn.entries].sort((a, b) => compareExtendedDayTimes(a.time, b.time))
       );
     }
   }

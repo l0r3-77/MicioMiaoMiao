@@ -8,7 +8,12 @@ import {
   sanitizeOrganizeItems,
   sanitizeTodoItems,
 } from './dailyTodoStorage';
-import { formatItalianDateShort, migrateNightOwlDailyNotes, toISODate } from './dateUtils';
+import {
+  compareExtendedDayTimes,
+  formatItalianDateShort,
+  migrateNightOwlDailyNotes,
+  toISODate,
+} from './dateUtils';
 import type { AllLayoutPreferences } from './layoutPreferences';
 import { VALID_NOTE_COLORS } from './noteColors';
 
@@ -182,7 +187,7 @@ export async function buildBackupPayload(
       ...dn,
       entries: [...dn.entries].sort(
         (a, b) =>
-          b.time.localeCompare(a.time) ||
+          compareExtendedDayTimes(b.time, a.time) ||
           (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
       ),
     }));
@@ -234,7 +239,7 @@ export async function buildBackupPayload(
     if (cmpTs !== 0) return cmpTs;
     const cmpDate = (b.date || '').localeCompare(a.date || '');
     if (cmpDate !== 0) return cmpDate;
-    return (b.time || '').localeCompare(a.time || '');
+    return compareExtendedDayTimes(b.time, a.time);
   });
 
   // Prominent snapshot of the most recent active day (preferring today if populated)
@@ -341,7 +346,7 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
           createdAt: typeof e.createdAt === 'string' ? e.createdAt : nowIso,
           updatedAt: typeof e.updatedAt === 'string' ? e.updatedAt : nowIso,
         }))
-        .sort((a, b) => a.time.localeCompare(b.time));
+        .sort((a, b) => compareExtendedDayTimes(a.time, b.time));
 
       return {
         id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `day-${date}`,
@@ -479,7 +484,7 @@ export function mergeDailyNotesFromBackup(
         existing.dailySummaryBullets.length > 0
           ? existing.dailySummaryBullets
           : inc.dailySummaryBullets,
-      entries: Array.from(entryMap.values()).sort((a, b) => a.time.localeCompare(b.time)),
+      entries: Array.from(entryMap.values()).sort((a, b) => compareExtendedDayTimes(a.time, b.time)),
       updatedAt:
         inc.updatedAt > existing.updatedAt ? inc.updatedAt : existing.updatedAt,
     });

@@ -18,10 +18,12 @@ import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
 import {
   DAY_PERIOD_LABELS,
   addDaysISO,
+  compareExtendedDayTimes,
   formatItalianDateLong,
   formatItalianDateShort,
   getAgendaDefaultDateISO,
   getDayPeriod,
+  getExtendedDayHourFloat,
   parseISODate,
   toISODate,
   type DayPeriod,
@@ -104,6 +106,7 @@ interface FlatEntry {
   period: DayPeriod;
   hour: number;
   minute: number;
+  extendedHourFloat: number;
   colorValence: ColorValence;
   colorScore: number;
 }
@@ -545,18 +548,19 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           period: dp,
           hour,
           minute,
+          extendedHourFloat: getExtendedDayHourFloat(entry.time || '09:00'),
           colorValence: meta.valence,
           colorScore: meta.valenceScore,
         });
       }
     }
 
-    return result.sort((a, b) =>
-      `${a.date} ${a.entry.time}`.localeCompare(`${b.date} ${b.entry.time}`)
+    return result.sort(
+      (a, b) => a.date.localeCompare(b.date) || compareExtendedDayTimes(a.entry.time, b.entry.time)
     );
   }, [dailyNotes, dateRange, selectedColors, dayPeriodFilter, keywordFilter]);
 
-  // All entries passing color/period/keyword filters across all dates (for single-day 00:00-24:00 boundary interpolation)
+  // All entries passing color/period/keyword filters across all dates (for single-day 05:00-05:00 boundary interpolation)
   const nonDateFilteredEntries = useMemo<FlatEntry[]>(() => {
     const q = keywordFilter.trim().toLowerCase();
     const result: FlatEntry[] = [];
@@ -589,14 +593,15 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           period: dp,
           hour,
           minute,
+          extendedHourFloat: getExtendedDayHourFloat(entry.time || '09:00'),
           colorValence: meta.valence,
           colorScore: meta.valenceScore,
         });
       }
     }
 
-    return result.sort((a, b) =>
-      `${a.date} ${a.entry.time}`.localeCompare(`${b.date} ${b.entry.time}`)
+    return result.sort(
+      (a, b) => a.date.localeCompare(b.date) || compareExtendedDayTimes(a.entry.time, b.entry.time)
     );
   }, [dailyNotes, selectedColors, dayPeriodFilter, keywordFilter]);
 
@@ -735,14 +740,18 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
   }, [dayPeriodStats]);
 
   const hourlyCounts = useMemo(() => {
-    const hours = Array.from({ length: 24 }, (_, hour) => ({
+    // Extended day order: 05:00..23:00 followed by 00:00..04:00 at the end of the day
+    const hourOrder = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4];
+    const hours = hourOrder.map((hour) => ({
       hour,
       count: 0,
       dominantColor: 'amber' as NoteColor,
       colorMap: {} as Partial<Record<NoteColor, number>>,
     }));
+    const slotByHour = new Map(hours.map((s) => [s.hour, s]));
     for (const item of flatEntries) {
-      const slot = hours[item.hour];
+      const slot = slotByHour.get(item.hour);
+      if (!slot) continue;
       slot.count++;
       slot.colorMap[item.entry.color] = (slot.colorMap[item.entry.color] || 0) + 1;
     }
@@ -838,10 +847,10 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       byTime.set(timeKey, arr);
     }
     return Array.from(byTime.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => compareExtendedDayTimes(a[0], b[0]))
       .map(([timeStr, items]) => {
         const first = items[0];
-        const hourFloat = first.hour + first.minute / 60;
+        const hourFloat = first.extendedHourFloat;
         const veryPosCount = items.filter((i) => i.colorValence === 'very_positive').length;
         const posCount = items.filter((i) => i.colorValence === 'positive').length;
         const midCount = items.filter((i) => i.colorValence === 'middle').length;
@@ -912,7 +921,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       const MS_PER_DAY = 86400000;
 
       const points = singleDayTimelineSlots.map((slot) => {
-        const x = plotPadX + (Math.max(0, Math.min(24, slot.hourFloat)) / 24) * usableW;
+        const x = plotPadX + ((Math.max(5, Math.min(29, slot.hourFloat)) - 5) / 24) * usableW;
         const y = scoreToY(slot.avgScore);
         return {
           x,
@@ -923,12 +932,12 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         };
       });
 
-      const hourTicks = [0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => ({
-        x: plotPadX + (h / 24) * usableW,
-        label: h === 24 ? '24:00' : `${String(h).padStart(2, '0')}:00`,
+      const hourTicks = [5, 8, 11, 14, 17, 20, 23, 26, 29].map((h) => ({
+        x: plotPadX + ((h - 5) / 24) * usableW,
+        label: `${String(h >= 24 ? h - 24 : h).padStart(2, '0')}:00`,
       }));
 
-      // Interpolate continuous 00:00 start & 24:00 end using nearest entries before and after singleDayDate
+      // Interpolate continuous 05:00 start & 05:00 end (extended day) using nearest entries before and after singleDayDate
       const beforeEntries = nonDateFilteredEntries.filter((e) => e.date < targetDay);
       const afterEntries = nonDateFilteredEntries.filter((e) => e.date > targetDay);
       const lastPrevEntry =
@@ -943,35 +952,36 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         const lastSlot = singleDayTimelineSlots[singleDayTimelineSlots.length - 1];
 
         let startScore = firstSlot.avgScore;
-        let startHint = '00:00 (proiezione inizio giornata)';
+        let startHint = '05:00 (proiezione inizio giornata)';
         if (lastPrevEntry) {
           const prevDaysDiff = Math.max(
             1,
             Math.round((targetMs - parseISODate(lastPrevEntry.date).getTime()) / MS_PER_DAY)
           );
-          const prevHour = lastPrevEntry.hour + lastPrevEntry.minute / 60;
-          const dtBefore = Math.max(0.25, prevDaysDiff * 24 - prevHour);
-          const dtAfter = Math.max(0.25, firstSlot.hourFloat);
+          const dtBefore = Math.max(0.25, prevDaysDiff * 24 + 5 - lastPrevEntry.extendedHourFloat);
+          const dtAfter = Math.max(0.25, firstSlot.hourFloat - 5);
           startScore =
             lastPrevEntry.colorScore +
             (firstSlot.avgScore - lastPrevEntry.colorScore) * (dtBefore / (dtBefore + dtAfter));
-          startHint = `00:00 (da ${formatItalianDateShort(lastPrevEntry.date)} · valenza ${startScore.toFixed(2)})`;
+          startHint = `05:00 (da ${formatItalianDateShort(lastPrevEntry.date)} · valenza ${startScore.toFixed(2)})`;
         }
 
         let endScore = lastSlot.avgScore;
-        let endHint = '24:00 (proiezione fine giornata)';
+        let endHint = '05:00 (proiezione fine giornata)';
         if (firstNextEntry) {
           const nextDaysDiff = Math.max(
             1,
             Math.round((parseISODate(firstNextEntry.date).getTime() - targetMs) / MS_PER_DAY)
           );
-          const nextHour = firstNextEntry.hour + firstNextEntry.minute / 60;
-          const dtBefore = Math.max(0.25, 24 - lastSlot.hourFloat);
-          const dtAfter = Math.max(0.25, (nextDaysDiff - 1) * 24 + nextHour);
+          const dtBefore = Math.max(0.25, 29 - lastSlot.hourFloat);
+          const dtAfter = Math.max(
+            0.25,
+            (nextDaysDiff - 1) * 24 + (firstNextEntry.extendedHourFloat - 5)
+          );
           endScore =
             lastSlot.avgScore +
             (firstNextEntry.colorScore - lastSlot.avgScore) * (dtBefore / (dtBefore + dtAfter));
-          endHint = `24:00 (verso ${formatItalianDateShort(firstNextEntry.date)} · valenza ${endScore.toFixed(2)})`;
+          endHint = `05:00 (verso ${formatItalianDateShort(firstNextEntry.date)} · valenza ${endScore.toFixed(2)})`;
         }
 
         const x0 = plotPadX;
@@ -1160,20 +1170,20 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
         byTime.set(timeKey, arr);
       }
       const chronologicalSlots = Array.from(byTime.entries())
-        .sort((a, b) => a[0].localeCompare(b[0]))
+        .sort((a, b) => compareExtendedDayTimes(a[0], b[0]))
         .map(([timeStr, items]) => {
           const first = items[0];
           return {
             timeStr,
-            hourFloat: first.hour + first.minute / 60,
+            hourFloat: first.extendedHourFloat,
             label: `${formatItalianDateShort(first.date)} · ${timeStr}`,
             items,
           };
         });
 
-      const hourTicks = [0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => ({
-        x: plotPadX + (h / 24) * usableW,
-        label: h === 24 ? '24:00' : `${String(h).padStart(2, '0')}:00`,
+      const hourTicks = [5, 8, 11, 14, 17, 20, 23, 26, 29].map((h) => ({
+        x: plotPadX + ((h - 5) / 24) * usableW,
+        label: `${String(h >= 24 ? h - 24 : h).padStart(2, '0')}:00`,
       }));
 
       const beforeEntries = nonDateFilteredEntries.filter((e) => e.date < targetDay);
@@ -1191,7 +1201,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           }
           if (vals.length === 0) continue;
           const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-          const x = plotPadX + (Math.max(0, Math.min(24, slot.hourFloat)) / 24) * usableW;
+          const x = plotPadX + ((Math.max(5, Math.min(29, slot.hourFloat)) - 5) / 24) * usableW;
           pts.push({
             x,
             y: scoreToY(avg),
@@ -1228,9 +1238,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               1,
               Math.round((targetMs - parseISODate(prevEntryWithDim.date).getTime()) / MS_PER_DAY)
             );
-            const prevHour = prevEntryWithDim.hour + prevEntryWithDim.minute / 60;
-            const dtBefore = Math.max(0.25, prevDaysDiff * 24 - prevHour);
-            const dtAfter = Math.max(0.25, firstSlot.hourFloat);
+            const dtBefore = Math.max(
+              0.25,
+              prevDaysDiff * 24 + 5 - prevEntryWithDim.extendedHourFloat
+            );
+            const dtAfter = Math.max(0.25, firstSlot.hourFloat - 5);
             startScore = prevScore + (firstScore - prevScore) * (dtBefore / (dtBefore + dtAfter));
           }
 
@@ -1241,9 +1253,11 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               1,
               Math.round((parseISODate(nextEntryWithDim.date).getTime() - targetMs) / MS_PER_DAY)
             );
-            const nextHour = nextEntryWithDim.hour + nextEntryWithDim.minute / 60;
-            const dtBefore = Math.max(0.25, 24 - lastSlot.hourFloat);
-            const dtAfter = Math.max(0.25, (nextDaysDiff - 1) * 24 + nextHour);
+            const dtBefore = Math.max(0.25, 29 - lastSlot.hourFloat);
+            const dtAfter = Math.max(
+              0.25,
+              (nextDaysDiff - 1) * 24 + (nextEntryWithDim.extendedHourFloat - 5)
+            );
             endScore = lastScore + (nextScore - lastScore) * (dtBefore / (dtBefore + dtAfter));
           }
 
@@ -1253,7 +1267,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               y: scoreToY(startScore),
               score: startScore,
               count: 0,
-              label: '00:00',
+              label: '05:00',
               isBoundary: true,
             },
             ...pts,
@@ -1262,7 +1276,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
               y: scoreToY(endScore),
               score: endScore,
               count: 0,
-              label: '24:00',
+              label: '05:00',
               isBoundary: true,
             },
           ];
@@ -1277,8 +1291,8 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       const lastHour =
         chronologicalSlots.length > 0
           ? chronologicalSlots[chronologicalSlots.length - 1].hourFloat
-          : 24;
-      const focusTargetX = plotPadX + (Math.max(0, Math.min(24, lastHour)) / 24) * usableW;
+          : 29;
+      const focusTargetX = plotPadX + ((Math.max(5, Math.min(29, lastHour)) - 5) / 24) * usableW;
 
       return {
         plotWidth,
@@ -2697,7 +2711,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     : 'text-[var(--app-text-muted)] hover:text-[var(--app-text)]'
                 }`}
               >
-                Ore 00–23
+                Ore 05–04
               </button>
               <button
                 type="button"
@@ -2720,7 +2734,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                 viewBox="0 0 480 96"
                 className="w-full h-24"
                 role="img"
-                aria-label="Distribuzione oraria degli appunti dalle 00 alle 23"
+                aria-label="Distribuzione oraria degli appunti dalle 05 alle 04"
               >
                 {hourlyCounts.map((slot, idx) => {
                   const barH = slot.count
@@ -2747,17 +2761,23 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   );
                 })}
                 <line x1="0" y1="76" x2="480" y2="76" stroke="var(--app-divider)" strokeWidth="1" />
-                {[0, 6, 13, 18, 23].map((h) => (
+                {[
+                  { idx: 0, label: '05' },
+                  { idx: 8, label: '13:30' },
+                  { idx: 13, label: '18:31' },
+                  { idx: 19, label: '00' },
+                  { idx: 23, label: '04' },
+                ].map((tick) => (
                   <text
-                    key={h}
-                    x={h * 20 + 9}
+                    key={tick.label}
+                    x={tick.idx * 20 + 9}
                     y="90"
                     textAnchor="middle"
                     fontSize="10"
                     fill="var(--app-text-subtle)"
                     fontFamily="monospace"
                   >
-                    {h === 13 ? '13:30' : h === 18 ? '18:31' : String(h).padStart(2, '0')}
+                    {tick.label}
                   </text>
                 ))}
               </svg>

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Pin, Plus, ZoomIn, ZoomOut } from 'lucide-re
 import type { AgendaViewMode, DailyNote, NoteColor, NoteEntry } from '../types/note';
 import {
   addDaysISO,
+  compareExtendedDayTimes,
   formatItalianDateLong,
   formatItalianDateShort,
   formatItalianMonthYear,
@@ -52,7 +53,7 @@ function getFilteredEntries(
   if (!dailyNote) return [];
   const q = searchQuery.trim().toLowerCase();
   return [...dailyNote.entries]
-    .sort((a, b) => a.time.localeCompare(b.time))
+    .sort((a, b) => compareExtendedDayTimes(a.time, b.time))
     .filter((entry) => {
       if (colorFilter !== 'all' && entry.color !== colorFilter) return false;
       if (!q) return true;

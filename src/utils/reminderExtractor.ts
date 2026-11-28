@@ -1,4 +1,5 @@
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
+import { compareExtendedDayTimes } from './dateUtils';
 
 /**
  * Regex patterns matching Italian action/reminder/intention phrases, self-questions,
@@ -88,7 +89,7 @@ export function collectAllReminders(dailyNotes: DailyNote[]): FlattenedReminder[
 
   const sortedDays = [...dailyNotes].sort((a, b) => b.date.localeCompare(a.date));
   for (const dn of sortedDays) {
-    const sortedEntries = [...dn.entries].sort((a, b) => b.time.localeCompare(a.time));
+    const sortedEntries = [...dn.entries].sort((a, b) => compareExtendedDayTimes(b.time, a.time));
     for (const entry of sortedEntries) {
       // If entry.reminders is explicitly defined (even empty array if user dismissed all),
       // use it; if undefined (older entries before this feature), run local extraction!

@@ -11,7 +11,12 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { DailyNote, NoteColor, NoteEntry } from '../types/note';
-import { formatDuration, formatItalianDateLong, formatItalianDateShort } from '../utils/dateUtils';
+import {
+  compareExtendedDayTimes,
+  formatDuration,
+  formatItalianDateLong,
+  formatItalianDateShort,
+} from '../utils/dateUtils';
 import { exportSingleDayNotes } from '../utils/exportReports';
 import { NOTE_COLOR_LIST, NOTE_COLORS } from '../utils/noteColors';
 
@@ -67,7 +72,7 @@ export const DailyNoteCard: React.FC<DailyNoteCardProps> = ({
 
   const q = searchQuery.trim().toLowerCase();
   const visibleEntries = [...dailyNote.entries]
-    .sort((a, b) => a.time.localeCompare(b.time))
+    .sort((a, b) => compareExtendedDayTimes(a.time, b.time))
     .filter((entry) => {
       if (colorFilter !== 'all' && entry.color !== colorFilter) return false;
       if (!q) return true;

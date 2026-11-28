@@ -49,6 +49,7 @@ import {
   type AgendaVoceBackupPayload,
 } from './utils/backupService';
 import {
+  compareExtendedDayTimes,
   formatItalianDateShort,
   getAgendaDefaultDateISO,
   getCurrentTimeHHMM,
@@ -78,7 +79,7 @@ import { applyThemeToDocument, subscribeSystemThemeChanges } from './utils/theme
 
 const STORAGE_KEY = 'agendavoce_daily_notes_v2';
 const LEGACY_STORAGE_KEY = 'agendavoce_notes_v1';
-const NIGHT_OWL_MIGRATION_KEY = 'miciomiao_night_owl_migrated_v1';
+const NIGHT_OWL_MIGRATION_KEY = 'miciomiao_night_owl_migrated_v2';
 
 type DesktopSection =
   | AgendaViewMode
@@ -177,7 +178,7 @@ function loadStoredDailyNotes(): DailyNote[] {
               ? item.entries
                   .filter((e): e is Record<string, unknown> => Boolean(e && typeof e === 'object'))
                   .map((e) => sanitizeEntry(e, nowIso))
-                  .sort((a, b) => a.time.localeCompare(b.time))
+                  .sort((a, b) => compareExtendedDayTimes(a.time, b.time))
               : [];
             return {
               id: typeof item.id === 'string' && item.id ? item.id : `day-${date}`,
@@ -237,7 +238,7 @@ function loadStoredDailyNotes(): DailyNote[] {
           }
           loaded = Array.from(grouped.values()).map((dn) => ({
             ...dn,
-            entries: dn.entries.sort((a, b) => a.time.localeCompare(b.time)),
+            entries: dn.entries.sort((a, b) => compareExtendedDayTimes(a.time, b.time)),
           }));
         }
       }
@@ -247,7 +248,7 @@ function loadStoredDailyNotes(): DailyNote[] {
       const migrated = migrateNightOwlDailyNotes(loaded, { onlyStrictCreatedAtMatch: false });
       loaded = migrated.notes;
       localStorage.setItem(NIGHT_OWL_MIGRATION_KEY, '1');
-      if (migrated.changed) {
+      if (loaded.length > 0 || migrated.changed) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
       }
     }
@@ -570,7 +571,9 @@ export default function App() {
           dn.date === targetDate
             ? {
                 ...dn,
-                entries: [...dn.entries, entry].sort((a, b) => a.time.localeCompare(b.time)),
+                entries: [...dn.entries, entry].sort((a, b) =>
+                  compareExtendedDayTimes(a.time, b.time)
+                ),
                 updatedAt: nowIso,
               }
             : dn
@@ -628,7 +631,7 @@ export default function App() {
                   entries: (hasEntry
                     ? dn.entries.map((e) => (e.id === updatedEntry.id ? updatedEntry : e))
                     : [...dn.entries, updatedEntry]
-                  ).sort((a, b) => a.time.localeCompare(b.time)),
+                  ).sort((a, b) => compareExtendedDayTimes(a.time, b.time)),
                   updatedAt: nowIso,
                 }
               : dn
@@ -670,7 +673,7 @@ export default function App() {
             ? {
                 ...dn,
                 entries: [...dn.entries, updatedEntry].sort((a, b) =>
-                  a.time.localeCompare(b.time)
+                  compareExtendedDayTimes(a.time, b.time)
                 ),
                 updatedAt: nowIso,
               }
@@ -850,7 +853,7 @@ export default function App() {
     if (!targetDay) return;
 
     const combinedText = [...targetDay.entries]
-      .sort((a, b) => a.time.localeCompare(b.time))
+      .sort((a, b) => compareExtendedDayTimes(a.time, b.time))
       .map((e) => `[${e.time}] ${e.transcript || '(Solo audio senza testo)'}`)
       .join('\n');
 

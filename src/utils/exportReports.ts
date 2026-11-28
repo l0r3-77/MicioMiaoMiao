@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import type { DailyNote } from '../types/note';
 import {
+  compareExtendedDayTimes,
   formatItalianDateLong,
   formatItalianDateShort,
   getDayPeriod,
@@ -93,7 +94,7 @@ export function buildNotesExportRows(dailyNotes: DailyNote[], startDate?: string
     .sort((a, b) => a.date.localeCompare(b.date));
 
   for (const dn of sortedDays) {
-    const sortedEntries = [...dn.entries].sort((a, b) => a.time.localeCompare(b.time));
+    const sortedEntries = [...dn.entries].sort((a, b) => compareExtendedDayTimes(a.time, b.time));
     for (const entry of sortedEntries) {
       const col = NOTE_COLORS[entry.color] || NOTE_COLORS.amber;
       rows.push({

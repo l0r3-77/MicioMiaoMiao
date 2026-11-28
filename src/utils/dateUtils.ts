@@ -23,6 +23,25 @@ export function isNightOwlTime(hhmm?: string): boolean {
   return Number.isFinite(h) && h >= 0 && h < 5;
 }
 
+export function getExtendedDayMinutes(hhmm?: string): number {
+  const [hStr, mStr] = (hhmm || '09:00').split(':');
+  const rawH = Number(hStr);
+  const rawM = Number(mStr);
+  const h = Number.isFinite(rawH) ? Math.max(0, Math.min(23, rawH)) : 9;
+  const m = Number.isFinite(rawM) ? Math.max(0, Math.min(59, rawM)) : 0;
+  // Day runs 05:00 -> 23:59 -> 00:00..04:59 (at end of day as 24:00..28:59)
+  const extH = h < 5 ? h + 24 : h;
+  return extH * 60 + m;
+}
+
+export function getExtendedDayHourFloat(hhmm?: string): number {
+  return getExtendedDayMinutes(hhmm) / 60;
+}
+
+export function compareExtendedDayTimes(aTime?: string, bTime?: string): number {
+  return getExtendedDayMinutes(aTime) - getExtendedDayMinutes(bTime);
+}
+
 export function getAgendaDefaultDateISO(now: Date = new Date()): string {
   const calendarToday = toISODate(now);
   if (now.getHours() >= 0 && now.getHours() < 5) {
@@ -288,7 +307,7 @@ export function migrateNightOwlDailyNotes(
     .filter((d) => d.entries.length > 0)
     .map((d) => ({
       ...d,
-      entries: [...d.entries].sort((a, b) => a.time.localeCompare(b.time)),
+      entries: [...d.entries].sort((a, b) => compareExtendedDayTimes(a.time, b.time)),
     }))
     .sort((a, b) => b.date.localeCompare(a.date));
 
