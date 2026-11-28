@@ -438,21 +438,32 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
         />
       )}
 
-      {/* Fixed Bottom-Right Undo Button above mobile nav */}
-      <button
-        type="button"
-        onClick={subTab === 'da_fare' ? handleUndoTodo : handleUndoOrganize}
-        disabled={
-          subTab === 'da_fare'
-            ? todoUndoStack.length === 0
-            : organizeUndoStack.length === 0
-        }
-        aria-label="Annulla ultima azione"
-        title="Annulla ultima azione"
-        className="fixed bottom-[64px] lg:bottom-6 right-4 z-30 h-11 w-11 inline-flex items-center justify-center rounded-2xl border border-[var(--todo-card-border)] bg-[var(--todo-card)]/95 backdrop-blur-md text-[var(--todo-text)] shadow-lg hover:bg-[var(--todo-accent-soft)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all"
-      >
-        <Undo2 className="h-5 w-5 text-[var(--todo-accent)]" aria-hidden="true" />
-      </button>
+      {/* Fixed Bottom-Right Undo Button cleanly above mobile nav */}
+      {(() => {
+        const canUndo =
+          subTab === 'da_fare' ? todoUndoStack.length > 0 : organizeUndoStack.length > 0;
+        return (
+          <button
+            type="button"
+            onClick={subTab === 'da_fare' ? handleUndoTodo : handleUndoOrganize}
+            disabled={!canUndo}
+            aria-label="Annulla ultima azione"
+            title={canUndo ? 'Annulla ultima azione' : 'Nessuna azione da annullare'}
+            className={`fixed bottom-[calc(62px+env(safe-area-inset-bottom,0px))] lg:bottom-6 right-4 z-[45] h-11 w-11 inline-flex items-center justify-center rounded-2xl border bg-[var(--todo-card)] shadow-lg transition-all ${
+              canUndo
+                ? 'border-[var(--todo-accent)] text-[var(--todo-accent)] hover:bg-[var(--todo-accent-soft)] active:scale-95'
+                : 'border-[var(--todo-card-border)] text-[var(--todo-text-muted)] cursor-default'
+            }`}
+          >
+            <Undo2
+              className={`h-5 w-5 ${
+                canUndo ? 'text-[var(--todo-accent)]' : 'text-[var(--todo-text-muted)]/60'
+              }`}
+              aria-hidden="true"
+            />
+          </button>
+        );
+      })()}
     </div>
   );
 };

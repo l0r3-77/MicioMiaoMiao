@@ -1,3 +1,5 @@
+import type { DailyNote, NoteEntry } from '../types/note';
+
 export function toISODate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -167,3 +169,128 @@ export const DAY_PERIOD_LABELS: Record<
   sera: { title: 'Sera', range: '18:31 – 23:59', shortRange: '18:31–23:59' },
   notte: { title: 'Notte', range: '00:00 – 05:59', shortRange: '00:00–05:59' },
 };
+
+export function migrateNightOwlDailyNotes(
+  notes: DailyNote[],
+  options: { onlyStrictCreatedAtMatch?: boolean } = {}
+): { notes: DailyNote[]; changed: boolean } {
+  const { onlyStrictCreatedAtMatch = false } = options;
+  const nowIso = new Date().toISOString();
+  const byDate = new Map<string, DailyNote>();
+  let changed = false;
+
+  const ensureDay = (date: string, template?: DailyNote, copyPinned = false): DailyNote => {
+    const existing = byDate.get(date);
+    if (existing) return existing;
+    const created: DailyNote = {
+      id: `day-${date}`,
+      date,
+      title: template ? `Diario del ${formatItalianDateShort(date)}` : `Diario del ${formatItalianDateShort(date)}`,
+      pinned: copyPinned && template ? template.pinned : false,
+      dailySummaryBullets: [],
+      entries: [],
+      createdAt: template?.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+    byDate.set(date, created);
+    return created;
+  };
+
+  for (const dn of notes) {
+    const allMove =
+      dn.entries.length > 0 &&
+      dn.entries.every((e) => {
+        if (!isNightOwlTime(e.time)) return false;
+        const createdDate = e.createdAt ? new Date(e.createdAt) : null;
+        if (onlyStrictCreatedAtMatch) {
+          return Boolean(
+            createdDate &&
+              !Number.isNaN(createdDate.getTime()) &&
+              createdDate.getHours() >= 0 &&
+              createdDate.getHours() < 5 &&
+              toISODate(createdDate) === dn.date
+          );
+        }
+        if (createdDate && !Number.isNaN(createdDate.getTime())) {
+          if (toISODate(createdDate) === addDaysISO(dn.date, 1)) {
+            return false; // already shifted previously
+          }
+        }
+        return true;
+      });
+
+    const stayingEntries: NoteEntry[] = [];
+
+    for (const entry of dn.entries) {
+      let shouldMove = false;
+      if (isNightOwlTime(entry.time)) {
+        const createdDate = entry.createdAt ? new Date(entry.createdAt) : null;
+        const hasValidCreated = Boolean(createdDate && !Number.isNaN(createdDate.getTime()));
+        if (onlyStrictCreatedAtMatch) {
+          if (
+            hasValidCreated &&
+            createdDate!.getHours() >= 0 &&
+            createdDate!.getHours() < 5 &&
+            toISODate(createdDate!) === dn.date
+          ) {
+            shouldMove = true;
+          }
+        } else {
+          const alreadyShifted =
+            hasValidCreated && toISODate(createdDate!) === addDaysISO(dn.date, 1);
+          if (!alreadyShifted) {
+            shouldMove = true;
+          }
+        }
+      }
+
+      if (shouldMove) {
+        changed = true;
+        const prevDate = addDaysISO(dn.date, -1);
+        const targetDay = ensureDay(prevDate, dn, allMove);
+        if (!targetDay.entries.some((e) => e.id === entry.id)) {
+          targetDay.entries.push(entry);
+          targetDay.updatedAt = nowIso;
+        }
+      } else {
+        stayingEntries.push(entry);
+      }
+    }
+
+    if (stayingEntries.length > 0) {
+      const existing = byDate.get(dn.date);
+      if (existing) {
+        const map = new Map(existing.entries.map((e) => [e.id, e]));
+        for (const e of stayingEntries) {
+          if (!map.has(e.id)) map.set(e.id, e);
+        }
+        byDate.set(dn.date, {
+          ...existing,
+          title: dn.title || existing.title,
+          pinned: existing.pinned || dn.pinned,
+          dailySummaryBullets:
+            existing.dailySummaryBullets.length > 0
+              ? existing.dailySummaryBullets
+              : dn.dailySummaryBullets,
+          entries: Array.from(map.values()),
+          updatedAt: dn.updatedAt > existing.updatedAt ? dn.updatedAt : existing.updatedAt,
+        });
+      } else {
+        byDate.set(dn.date, {
+          ...dn,
+          entries: stayingEntries,
+        });
+      }
+    }
+  }
+
+  const normalized = Array.from(byDate.values())
+    .filter((d) => d.entries.length > 0)
+    .map((d) => ({
+      ...d,
+      entries: [...d.entries].sort((a, b) => a.time.localeCompare(b.time)),
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  return { notes: normalized, changed };
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -20,6 +20,7 @@ import {
   addDaysISO,
   formatItalianDateLong,
   formatItalianDateShort,
+  getAgendaDefaultDateISO,
   getDayPeriod,
   parseISODate,
   toISODate,
@@ -398,7 +399,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
 
   const [prefs, setPrefs] = useState<StatsPreferences>(loadPreferences);
   const [periodFilter, setPeriodFilter] = useState<StatsPeriod>('30d');
-  const [singleDayDate, setSingleDayDate] = useState<string>(() => todayISO);
+  const [singleDayDate, setSingleDayDate] = useState<string>(() => getAgendaDefaultDateISO());
   const [customStartDate, setCustomStartDate] = useState<string>(() => addDaysISO(todayISO, -13));
   const [customEndDate, setCustomEndDate] = useState<string>(() => todayISO);
 
@@ -421,6 +422,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
   const valenceBarsScrollRef = useRef<HTMLDivElement | null>(null);
   const fiveDimensionsChartRef = useRef<HTMLDivElement | null>(null);
   const fiveDimScrollRef = useRef<HTMLDivElement | null>(null);
+  const fiveDimSnapPendingRef = useRef(true);
   const colorsChartRef = useRef<HTMLDivElement | null>(null);
   const hourlyChartRef = useRef<HTMLDivElement | null>(null);
 
@@ -1375,7 +1377,14 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
   ]);
 
   // Auto-scroll timeline horizontally to rightmost (current/most recent days or latest hours) whenever filters or mode change
-  useEffect(() => {
+  useLayoutEffect(() => {
+    fiveDimSnapPendingRef.current = true;
+    const snapFiveDimRight = () => {
+      const el = fiveDimScrollRef.current;
+      if (el && el.scrollWidth > el.clientWidth) {
+        el.scrollLeft = el.scrollWidth - el.clientWidth;
+      }
+    };
     const scrollChartsToLatest = () => {
       if (periodFilter !== 'single_day') {
         if (timelineScrollRef.current) {
@@ -1391,38 +1400,48 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           }
         }
       }
-      if (fiveDimScrollRef.current) {
-        const el = fiveDimScrollRef.current;
-        if (el.scrollWidth > el.clientWidth) {
-          if (periodFilter === 'single_day') {
-            const targetPx = Math.max(
-              0,
-              Math.min(
-                el.scrollWidth - el.clientWidth,
-                fiveDimensionsGeometry.focusTargetX - el.clientWidth + 44
-              )
-            );
-            el.scrollLeft = targetPx;
-          } else {
-            el.scrollLeft = el.scrollWidth - el.clientWidth;
-          }
-        }
-      }
+      snapFiveDimRight();
     };
+    scrollChartsToLatest();
     const rafId = window.requestAnimationFrame(scrollChartsToLatest);
-    const tId = window.setTimeout(scrollChartsToLatest, 80);
+    const tId1 = window.setTimeout(scrollChartsToLatest, 60);
+    const tId2 = window.setTimeout(() => {
+      scrollChartsToLatest();
+      fiveDimSnapPendingRef.current = false;
+    }, 240);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && fiveDimScrollRef.current) {
+      ro = new ResizeObserver(() => {
+        if (fiveDimSnapPendingRef.current) {
+          snapFiveDimRight();
+        }
+      });
+      ro.observe(fiveDimScrollRef.current);
+    }
+
     return () => {
       window.cancelAnimationFrame(rafId);
-      window.clearTimeout(tId);
+      window.clearTimeout(tId1);
+      window.clearTimeout(tId2);
+      ro?.disconnect();
     };
   }, [
     periodFilter,
+    singleDayDate,
+    customStartDate,
+    customEndDate,
+    selectedColors,
+    dayPeriodFilter,
+    keywordFilter,
+    activeDimensions,
     prefs.timelineChartType,
     timelineBuckets.length,
     flatEntries.length,
     dateRange.start,
     dateRange.end,
-    fiveDimensionsGeometry.focusTargetX,
+    fiveDimensionsGeometry.plotWidth,
+    fiveDimensionsGeometry.hasAnyPoint,
   ]);
 
   // Sensations analytics: unified similar phrases, grouped by area, ordered +2 to -2 vertically
@@ -2229,7 +2248,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                   Andamento 5 sensazioni nel tempo ({dateRange.label})
                 </h3>
                 <p className="text-[11px] sm:text-xs text-[var(--app-text-muted)] mt-0.5">
-                  Valutazione da testo e sintesi (+2 stato migliore · -2 carico critico)
+                  Basato sul colore dell&apos;appunto e sulle parole analizzate (+2 stato migliore · -2 carico critico)
                 </p>
               </div>
               {activeCount < 5 && (
@@ -2351,7 +2370,19 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
                     </div>
 
                     {/* Horizontally Scrollable 5-Dimension Plot */}
-                    <div ref={fiveDimScrollRef} className="flex-1 min-w-0 overflow-x-auto">
+                    <div
+                      ref={fiveDimScrollRef}
+                      onPointerDown={() => {
+                        fiveDimSnapPendingRef.current = false;
+                      }}
+                      onTouchStart={() => {
+                        fiveDimSnapPendingRef.current = false;
+                      }}
+                      onWheel={() => {
+                        fiveDimSnapPendingRef.current = false;
+                      }}
+                      className="flex-1 min-w-0 overflow-x-auto"
+                    >
                       <svg
                         width={fiveDimensionsGeometry.plotWidth}
                         height={fiveDimensionsGeometry.height}

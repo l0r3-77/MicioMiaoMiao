@@ -8,7 +8,7 @@ import {
   sanitizeOrganizeItems,
   sanitizeTodoItems,
 } from './dailyTodoStorage';
-import { formatItalianDateShort, toISODate } from './dateUtils';
+import { formatItalianDateShort, migrateNightOwlDailyNotes, toISODate } from './dateUtils';
 import type { AllLayoutPreferences } from './layoutPreferences';
 import { VALID_NOTE_COLORS } from './noteColors';
 
@@ -404,11 +404,15 @@ export function validateAndParseBackupJson(rawText: string): AgendaVoceBackupPay
         )
       : undefined;
 
+  const migratedBackupDays = migrateNightOwlDailyNotes(sanitizedDays, {
+    onlyStrictCreatedAtMatch: true,
+  }).notes;
+
   return {
     version: 1,
     app: 'MicioMiao',
     exportedAt: typeof record.exportedAt === 'string' ? record.exportedAt : nowIso,
-    dailyNotes: sanitizedDays,
+    dailyNotes: migratedBackupDays,
     ...(todoItems ? { todoItems } : {}),
     ...(organizeItems ? { organizeItems } : {}),
     layouts:

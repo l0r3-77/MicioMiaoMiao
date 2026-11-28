@@ -125,7 +125,7 @@ const SIGNAL_RULES: WeightedSignalRule[] = [
   },
   {
     dimension: 'umore',
-    pattern: /\b(content\w*|felic\w*|gioios\w*|gioia|allegro|allegra|allegria|ottimist\w*|sorrident\w*|soddisfatt\w*|grat\w*|fiduci\w*|seren\w*|buon\s+umore|umore\s+(?:alto|buono|positivo|ottimo|sereno|sollevato)|sollievo|appagato|appagata|leggerezza)\b/g,
+    pattern: /\b(content\w*|felic\w*|gioios\w*|gioia|allegro|allegra|allegria|ottimist\w*|sorrident\w*|soddisfatt\w*|grat\w*|fiduci\w*|seren\w*|buon\s+umore|sto\s+bene|giornata\s+(?:bella|positiva|buona)|bella\s+giornata|umore\s+(?:alto|buono|positivo|ottimo|sereno|sollevato)|sollievo|appagato|appagata|leggerezza)\b/g,
     baseScore: 1.35,
     weight: 1.3,
   },
@@ -138,13 +138,13 @@ const SIGNAL_RULES: WeightedSignalRule[] = [
   },
   {
     dimension: 'umore',
-    pattern: /\b(trist\w*|giu\s+di\s+morale|morale\s+(?:basso|a\s+terra)|giu\s+di\s+corda|malincon\w*|delus\w*|amareggiat\w*|demoralizz\w*|scoraggi\w*|umore\s+(?:basso|negativo|cupo|grigio|pessimo|nero)|spento|spenta|abbattut\w*|scontento|insoddisfatt\w*|malumore)\b/g,
+    pattern: /\b(trist\w*|giu\s+di\s+morale|mi\s+sento\s+giu|sto\s+giu|morale\s+(?:basso|a\s+terra)|giu\s+di\s+corda|malincon\w*|delus\w*|amareggiat\w*|demoralizz\w*|scoraggi\w*|giornata\s+(?:no|brutta|storta|grigia)|sto\s+male|umore\s+(?:basso|negativo|cupo|grigio|pessimo|nero)|spento|spenta|abbattut\w*|scontento|insoddisfatt\w*|malumore)\b/g,
     baseScore: -1.35,
     weight: 1.35,
   },
   {
     dimension: 'umore',
-    pattern: /\b(depress\w*|disperat\w*|piang\w*|pianto|lacrim\w*|arrabbiat\w*|rabbia|furi\w*|frustrat\w*|esasperat\w*|senso\s+di\s+vuoto|vuoto\s+dentro|a\s+terra|schifo|malissimo|umore\s+(?:pessimo|terribile|distrugg\w*))\b/g,
+    pattern: /\b(depress\w*|disperat\w*|piang\w*|pianto|lacrim\w*|arrabbiat\w*|rabbia|furi\w*|frustrat\w*|esasperat\w*|senso\s+di\s+vuoto|vuoto\s+dentro|a\s+terra|schifo|malissimo|giornata\s+(?:pessima|terribile|orribile)|umore\s+(?:pessimo|terribile|distrugg\w*))\b/g,
     baseScore: -1.9,
     weight: 1.6,
   },
@@ -236,7 +236,7 @@ const SIGNAL_RULES: WeightedSignalRule[] = [
   },
   {
     dimension: 'stress',
-    pattern: /\b(stress\w*|sotto\s+pressione|pressione\s+(?:alta|forte|costante)|sovraccaric\w*|carico\s+(?:pesante|eccessivo|di\s+lavoro)|troppe\s+cose\s+da\s+fare|corri\w*\s+tutto\s+il\s+giorno|di\s+corsa|fretta\s+(?:continua|costante)|tension\w*|teso|tesa|nervos\w*|irritabil\w*|scadenze\s+pressanti|in\s+affanno|affannat\w*|oppress\w*|soffocat\w*|ingolfat\w*|stress\s*(?:medio[\s-]alto|alto|forte|pesante|elevato|crescente))\b/g,
+    pattern: /\b(stress\w*|sotto\s+pressione|pressione\s+(?:alta|forte|costante)|sovraccaric\w*|carico\s+(?:pesante|eccessivo|di\s+lavoro)|giornata\s+(?:pesante|intensa|faticosa|frenetica)|lavoro\s+intenso|troppe\s+cose\s+da\s+fare|corri\w*\s+tutto\s+il\s+giorno|di\s+corsa|fretta\s+(?:continua|costante)|tension\w*|teso|tesa|nervos\w*|irritabil\w*|scadenze\s+pressanti|in\s+affanno|affannat\w*|oppress\w*|soffocat\w*|ingolfat\w*|stress\s*(?:medio[\s-]alto|alto|forte|pesante|elevato|crescente))\b/g,
     baseScore: -1.4,
     weight: 1.45,
   },
@@ -419,28 +419,40 @@ export function analyzeEntrySensationDimensions(entry: NoteEntry): EntryDimensio
     }
   }
 
-  // 3. Mild contextual color fallback ONLY if text/bullets lacked explicit evidence for Umore
-  //    or if color is anthracite/red and reinforces emotional load slightly when no explicit dimension text existed.
+  // 3. Score synthesis: anchor primarily to the original note's assigned color (68% color + 32% analyzed text),
+  //    falling back directly to color valence where appropriate.
   const colorMeta = NOTE_COLORS[entry.color] || NOTE_COLORS.amber;
+  const colorScore = colorMeta.valenceScore;
+  const COLOR_WEIGHT = 0.68;
+  const TEXT_WEIGHT = 0.32;
   const result: EntryDimensionScores = {};
 
   (Object.keys(accum) as SensationDimensionKey[]).forEach((dim) => {
     const st = accum[dim];
     if (st.weight > 0) {
-      result[dim] = clampValenceScore(st.sum / st.weight);
+      const textScore = clampValenceScore(st.sum / st.weight);
+      result[dim] = clampValenceScore(colorScore * COLOR_WEIGHT + textScore * TEXT_WEIGHT);
     }
   });
 
-  // Always allow Umore to reflect entry color ONLY when no explicit Umore words/bullets existed
+  // Umore always anchors to the entry color when no explicit mood words existed
   if (result.umore === undefined) {
-    result.umore = colorMeta.valenceScore;
+    result.umore = colorScore;
   }
 
-  // For Anthracite (-2 low mental energy/apathy) or Red (-2 high distress), only use as weak fallback
-  // if the entry had bullets/transcript without explicit keywords for those dimensions? Wait:
-  // No — keeping Energia mentale, Energia fisica, Stress, Ansia pure to detected descriptive words/labels
-  // ensures each line only plots where that sensation was actually described or synthesized (avoiding identical parallel flat lines!).
-  // However, if bullets have "Energia: ..." without mental/physical split, both were already populated cleanly above.
+  // Anthracite (-2 apathy/drained) and Red (-2 stress/anger) carry clear primary dimension meaning even in brief notes
+  if (entry.color === 'anthracite') {
+    if (result.energia_mentale === undefined) {
+      result.energia_mentale = -2;
+    }
+    if (result.energia_fisica === undefined) {
+      result.energia_fisica = -1.85;
+    }
+  } else if (entry.color === 'red') {
+    if (result.stress === undefined) {
+      result.stress = -2;
+    }
+  }
 
   return result;
 }

@@ -52,6 +52,7 @@ import {
   formatItalianDateShort,
   getAgendaDefaultDateISO,
   getCurrentTimeHHMM,
+  migrateNightOwlDailyNotes,
   toISODate,
 } from './utils/dateUtils';
 import {
@@ -77,6 +78,7 @@ import { applyThemeToDocument, subscribeSystemThemeChanges } from './utils/theme
 
 const STORAGE_KEY = 'agendavoce_daily_notes_v2';
 const LEGACY_STORAGE_KEY = 'agendavoce_notes_v1';
+const NIGHT_OWL_MIGRATION_KEY = 'miciomiao_night_owl_migrated_v1';
 
 type DesktopSection =
   | AgendaViewMode
@@ -160,12 +162,14 @@ function loadStoredDailyNotes(): DailyNote[] {
   const nowIso = new Date().toISOString();
   const today = toISODate(new Date());
 
+  let loaded: DailyNote[] = [];
+
   try {
     const rawV2 = localStorage.getItem(STORAGE_KEY);
     if (rawV2) {
       const parsed = JSON.parse(rawV2);
       if (Array.isArray(parsed)) {
-        return parsed
+        loaded = parsed
           .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
           .map((item) => {
             const date = typeof item.date === 'string' && item.date ? item.date : today;
@@ -193,56 +197,65 @@ function loadStoredDailyNotes(): DailyNote[] {
           })
           .filter((d) => d.entries.length > 0);
       }
-    }
+    } else {
+      const rawV1 = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (rawV1) {
+        const legacy = JSON.parse(rawV1);
+        if (Array.isArray(legacy) && legacy.length > 0) {
+          const grouped = new Map<string, DailyNote>();
+          for (const item of legacy) {
+            if (!item || typeof item !== 'object') continue;
+            const rec = item as Record<string, unknown>;
+            const date = typeof rec.date === 'string' && rec.date ? rec.date : today;
+            const entry = sanitizeEntry(rec, nowIso);
+            if (typeof rec.title === 'string' && rec.title.trim() && !rec.title.startsWith('Nota ')) {
+              const cleanTitle = rec.title.trim();
+              if (!entry.transcript.toLowerCase().startsWith(cleanTitle.toLowerCase())) {
+                entry.transcript = entry.transcript
+                  ? `${cleanTitle}: ${entry.transcript}`
+                  : cleanTitle;
+              }
+            }
 
-    const rawV1 = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (rawV1) {
-      const legacy = JSON.parse(rawV1);
-      if (Array.isArray(legacy) && legacy.length > 0) {
-        const grouped = new Map<string, DailyNote>();
-        for (const item of legacy) {
-          if (!item || typeof item !== 'object') continue;
-          const rec = item as Record<string, unknown>;
-          const date = typeof rec.date === 'string' && rec.date ? rec.date : today;
-          const entry = sanitizeEntry(rec, nowIso);
-          if (typeof rec.title === 'string' && rec.title.trim() && !rec.title.startsWith('Nota ')) {
-            const cleanTitle = rec.title.trim();
-            if (!entry.transcript.toLowerCase().startsWith(cleanTitle.toLowerCase())) {
-              entry.transcript = entry.transcript
-                ? `${cleanTitle}: ${entry.transcript}`
-                : cleanTitle;
+            const existing = grouped.get(date);
+            if (existing) {
+              existing.entries.push(entry);
+              existing.pinned = existing.pinned || Boolean(rec.pinned);
+              existing.updatedAt = nowIso;
+            } else {
+              grouped.set(date, {
+                id: `day-${date}`,
+                date,
+                title: `Diario del ${formatItalianDateShort(date)}`,
+                pinned: Boolean(rec.pinned),
+                dailySummaryBullets: [],
+                entries: [entry],
+                createdAt: entry.createdAt,
+                updatedAt: nowIso,
+              });
             }
           }
-
-          const existing = grouped.get(date);
-          if (existing) {
-            existing.entries.push(entry);
-            existing.pinned = existing.pinned || Boolean(rec.pinned);
-            existing.updatedAt = nowIso;
-          } else {
-            grouped.set(date, {
-              id: `day-${date}`,
-              date,
-              title: `Diario del ${formatItalianDateShort(date)}`,
-              pinned: Boolean(rec.pinned),
-              dailySummaryBullets: [],
-              entries: [entry],
-              createdAt: entry.createdAt,
-              updatedAt: nowIso,
-            });
-          }
+          loaded = Array.from(grouped.values()).map((dn) => ({
+            ...dn,
+            entries: dn.entries.sort((a, b) => a.time.localeCompare(b.time)),
+          }));
         }
-        return Array.from(grouped.values()).map((dn) => ({
-          ...dn,
-          entries: dn.entries.sort((a, b) => a.time.localeCompare(b.time)),
-        }));
+      }
+    }
+
+    if (localStorage.getItem(NIGHT_OWL_MIGRATION_KEY) !== '1') {
+      const migrated = migrateNightOwlDailyNotes(loaded, { onlyStrictCreatedAtMatch: false });
+      loaded = migrated.notes;
+      localStorage.setItem(NIGHT_OWL_MIGRATION_KEY, '1');
+      if (migrated.changed) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
       }
     }
   } catch {
     return [];
   }
 
-  return [];
+  return loaded;
 }
 
 function dailyNoteMatchesFilters(
@@ -2060,7 +2073,9 @@ export default function App() {
         <div
           role="status"
           className={`fixed right-4 z-40 rounded-xl bg-[var(--app-btn-bg)] px-4 py-2.5 text-xs font-medium text-[var(--app-btn-text)] shadow-lg ${
-            showTodoView ? 'bottom-[118px] lg:bottom-20' : 'bottom-16 lg:bottom-6'
+            showTodoView
+              ? 'bottom-[calc(116px+env(safe-area-inset-bottom,0px))] lg:bottom-20'
+              : 'bottom-[calc(62px+env(safe-area-inset-bottom,0px))] lg:bottom-6'
           }`}
         >
           {toastMessage}
