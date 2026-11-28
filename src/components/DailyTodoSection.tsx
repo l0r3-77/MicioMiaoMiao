@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ListChecks } from 'lucide-react';
+import { ListChecks, Undo2 } from 'lucide-react';
 import type {
   DayPhaseKey,
   OrganizeNoteItem,
@@ -18,6 +18,7 @@ export type TodoSubTab = 'da_fare' | 'organizza';
 
 export interface DuplicateSourcePayload {
   text: string;
+  details?: string;
   emoji?: string;
   done: boolean;
   source: 'voice' | 'text';
@@ -307,6 +308,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
         date,
         phase,
         text: todo.text,
+        ...(todo.details?.trim() ? { details: todo.details.trim() } : {}),
         emoji: resolveCatEmoticonId(todo.emoji, todo.text, todo.block),
         color: 'none',
         done: false,
@@ -349,6 +351,7 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
         date,
         phase,
         text: sourceNote.text,
+        ...(sourceNote.details?.trim() ? { details: sourceNote.details.trim() } : {}),
         emoji: resolveCatEmoticonId(
           sourceNote.emoji,
           sourceNote.text,
@@ -402,8 +405,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
         <DaFareSubsection
           todoItems={todoItems}
           sectionLayout={todoLayout}
-          canUndo={todoUndoStack.length > 0}
-          onUndo={handleUndoTodo}
           onChangeLayout={onChangeLayout}
           onResetLayout={onResetLayout}
           onAddTodo={handleAddTodo}
@@ -423,8 +424,6 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           todoItems={todoItems}
           organizeItems={organizeItems}
           sectionLayout={organizeLayout}
-          canUndo={organizeUndoStack.length > 0}
-          onUndo={handleUndoOrganize}
           onChangeLayout={onChangeLayout}
           onResetLayout={onResetLayout}
           onAddOrganizeItem={handleAddOrganizeItem}
@@ -438,6 +437,22 @@ export const DailyTodoSection: React.FC<DailyTodoSectionProps> = ({
           onNotify={onNotify}
         />
       )}
+
+      {/* Fixed Bottom-Right Undo Button above mobile nav */}
+      <button
+        type="button"
+        onClick={subTab === 'da_fare' ? handleUndoTodo : handleUndoOrganize}
+        disabled={
+          subTab === 'da_fare'
+            ? todoUndoStack.length === 0
+            : organizeUndoStack.length === 0
+        }
+        aria-label="Annulla ultima azione"
+        title="Annulla ultima azione"
+        className="fixed bottom-[64px] lg:bottom-6 right-4 z-30 h-11 w-11 inline-flex items-center justify-center rounded-2xl border border-[var(--todo-card-border)] bg-[var(--todo-card)]/95 backdrop-blur-md text-[var(--todo-text)] shadow-lg hover:bg-[var(--todo-accent-soft)] active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all"
+      >
+        <Undo2 className="h-5 w-5 text-[var(--todo-accent)]" aria-hidden="true" />
+      </button>
     </div>
   );
 };

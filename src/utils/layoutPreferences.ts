@@ -50,6 +50,7 @@ export const SECTION_BLOCKS: Record<LayoutSectionKey, SectionBlockDefinition[]> 
   stats: [
     { id: 'stats_export', label: 'Esportazione Excel & PDF' },
     { id: 'stats_timeline', label: 'Andamento nel periodo' },
+    { id: 'stats_five_dimensions', label: 'Andamento 5 sensazioni nel tempo' },
     { id: 'stats_colors', label: 'Colori & Valenza emotiva' },
     { id: 'stats_hourly', label: 'Orari & Fasce della giornata' },
     { id: 'stats_sensations', label: 'Sensazioni & Correlazioni' },

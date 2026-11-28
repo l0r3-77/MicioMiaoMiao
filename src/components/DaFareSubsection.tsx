@@ -17,7 +17,6 @@ import {
   Send,
   Square,
   Trash2,
-  Undo2,
   X,
 } from 'lucide-react';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -64,8 +63,6 @@ import type { DuplicateSourcePayload } from './DailyTodoSection';
 interface DaFareSubsectionProps {
   todoItems: TodoNoteItem[];
   sectionLayout: SectionLayoutState;
-  canUndo: boolean;
-  onUndo: () => void;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddTodo: (item: TodoNoteItem) => void;
@@ -99,8 +96,6 @@ interface DaFareSubsectionProps {
 export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   todoItems,
   sectionLayout,
-  canUndo,
-  onUndo,
   onChangeLayout,
   onResetLayout,
   onAddTodo,
@@ -130,6 +125,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   // Note Detail Modal (compact)
   const [selectedTodoId, setSelectedTodoId] = useState<string | null>(null);
   const [modalTextDraft, setModalTextDraft] = useState('');
+  const [modalDetailsDraft, setModalDetailsDraft] = useState('');
   const [modalRemDate, setModalRemDate] = useState('');
   const [modalRemTime, setModalRemTime] = useState('');
   const [showModalCatPicker, setShowModalCatPicker] = useState(false);
@@ -188,6 +184,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
   useEffect(() => {
     if (selectedTodo) {
       setModalTextDraft(selectedTodo.text);
+      setModalDetailsDraft(selectedTodo.details || '');
       setModalRemDate(selectedTodo.reminderDate || '');
       setModalRemTime(selectedTodo.reminderTime || '');
       setShowModalCatPicker(false);
@@ -885,7 +882,9 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                         <a
                           href={buildGoogleCalendarUrl({
                             title: item.text,
-                            details: `${TODO_BLOCK_MAP[blockKey].title}: ${item.text}`,
+                            details: item.details?.trim()
+                              ? `${item.details.trim()}\n\n(${TODO_BLOCK_MAP[blockKey].title}: ${item.text})`
+                              : `${TODO_BLOCK_MAP[blockKey].title}: ${item.text}`,
                             date: item.reminderDate!,
                             time: item.reminderTime!,
                           })}
@@ -967,16 +966,6 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-xs sm:text-sm font-bold text-[var(--todo-text)]">Nuova nota</h3>
             <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={onUndo}
-                disabled={!canUndo}
-                aria-label="Annulla ultima azione"
-                title="Annulla ultima azione"
-                className="min-h-[28px] w-7 inline-flex items-center justify-center rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] text-[var(--todo-text)] hover:bg-[var(--todo-accent-soft)] disabled:opacity-35 disabled:pointer-events-none transition-colors"
-              >
-                <Undo2 className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
-              </button>
               <button
                 type="button"
                 onClick={() => setShowComposerCatPicker((v) => !v)}
@@ -1233,19 +1222,33 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
               />
             )}
 
-            {/* Edit Text (Salva updates text + reminder and auto-closes) */}
-            <div className="flex gap-1.5">
+            {/* Edit Text & Extra Details (Salva updates text, details, reminder and auto-closes) */}
+            <div className="space-y-1.5">
               <input
                 type="text"
                 value={modalTextDraft}
                 onChange={(e) => setModalTextDraft(e.target.value)}
-                className="flex-1 min-h-[34px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)] focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
+                aria-label="Titolo nota"
+                className="w-full min-h-[34px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)] focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
               />
+              <label className="block">
+                <span className="block text-[10.5px] font-semibold text-[var(--todo-text-muted)] mb-1">
+                  Testo aggiuntivo (visibile solo aprendo la nota)
+                </span>
+                <textarea
+                  rows={3}
+                  value={modalDetailsDraft}
+                  onChange={(e) => setModalDetailsDraft(e.target.value)}
+                  placeholder="Aggiungi dettagli, note o promemoria..."
+                  className="w-full rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-surface)] px-2.5 py-1.5 text-xs text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/60 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => {
                   const clean = modalTextDraft.trim();
                   if (!clean) return;
+                  const cleanDetails = modalDetailsDraft.trim() || undefined;
                   const oldAuto = inferCatEmoticonId(selectedTodo.text, selectedTodo.block);
                   const currentResolved = resolveCatEmoticonId(
                     selectedTodo.emoji,
@@ -1257,6 +1260,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                     (currentResolved === oldAuto || currentResolved === 'cat_note');
                   onUpdateTodo(selectedTodo.id, {
                     text: clean,
+                    details: cleanDetails,
                     ...(shouldAutoUpdateIcon
                       ? { emoji: reconcileAutoCatEmoticonId(undefined, clean, selectedTodo.block) }
                       : {}),
@@ -1267,9 +1271,9 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                   setSelectedTodoId(null);
                   onNotify('Nota aggiornata');
                 }}
-                className="min-h-[34px] rounded-lg bg-[var(--todo-accent-dark)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90 shrink-0"
+                className="w-full min-h-[34px] rounded-lg bg-[var(--todo-accent-dark)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90"
               >
-                Salva
+                Salva modifiche
               </button>
             </div>
 
@@ -1313,7 +1317,9 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 <a
                   href={buildGoogleCalendarUrl({
                     title: modalTextDraft.trim() || selectedTodo.text,
-                    details: `${TODO_BLOCK_MAP[selectedTodo.block].title}: ${modalTextDraft.trim() || selectedTodo.text}`,
+                    details: modalDetailsDraft.trim()
+                      ? `${modalDetailsDraft.trim()}\n\n(${TODO_BLOCK_MAP[selectedTodo.block].title}: ${modalTextDraft.trim() || selectedTodo.text})`
+                      : `${TODO_BLOCK_MAP[selectedTodo.block].title}: ${modalTextDraft.trim() || selectedTodo.text}`,
                     date: modalRemDate,
                     time: modalRemTime,
                   })}
@@ -1324,6 +1330,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                     if (clean) {
                       onUpdateTodo(selectedTodo.id, {
                         text: clean,
+                        details: modalDetailsDraft.trim() || undefined,
                         reminderDate: modalRemDate,
                         reminderTime: modalRemTime,
                         updatedAt: new Date().toISOString(),
@@ -1411,7 +1418,30 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    onSendTodoToOrganize(selectedTodo, modalOrgDate, modalOrgPhase, false);
+                    const clean = modalTextDraft.trim() || selectedTodo.text;
+                    const cleanDetails = modalDetailsDraft.trim() || undefined;
+                    const payloadTodo: TodoNoteItem = {
+                      ...selectedTodo,
+                      text: clean,
+                      details: cleanDetails,
+                      reminderDate: modalRemDate || undefined,
+                      reminderTime: modalRemTime || undefined,
+                    };
+                    if (
+                      clean !== selectedTodo.text ||
+                      cleanDetails !== selectedTodo.details ||
+                      (modalRemDate || undefined) !== selectedTodo.reminderDate ||
+                      (modalRemTime || undefined) !== selectedTodo.reminderTime
+                    ) {
+                      onUpdateTodo(selectedTodo.id, {
+                        text: clean,
+                        details: cleanDetails,
+                        reminderDate: modalRemDate || undefined,
+                        reminderTime: modalRemTime || undefined,
+                        updatedAt: new Date().toISOString(),
+                      });
+                    }
+                    onSendTodoToOrganize(payloadTodo, modalOrgDate, modalOrgPhase, false);
                     setSelectedTodoId(null);
                   }}
                   className="min-h-[32px] rounded-lg bg-[var(--todo-accent-dark)] px-2 py-1 text-[10.5px] font-semibold text-white hover:opacity-90"
@@ -1421,7 +1451,14 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    onSendTodoToOrganize(selectedTodo, modalOrgDate, modalOrgPhase, true);
+                    const payloadTodo: TodoNoteItem = {
+                      ...selectedTodo,
+                      text: modalTextDraft.trim() || selectedTodo.text,
+                      details: modalDetailsDraft.trim() || undefined,
+                      reminderDate: modalRemDate || undefined,
+                      reminderTime: modalRemTime || undefined,
+                    };
+                    onSendTodoToOrganize(payloadTodo, modalOrgDate, modalOrgPhase, true);
                     setSelectedTodoId(null);
                   }}
                   className="min-h-[32px] rounded-lg border border-[var(--todo-card-border)] bg-[var(--todo-card)] px-2 py-1 text-[10.5px] font-semibold text-[var(--todo-text)] hover:bg-[var(--todo-surface)]"
@@ -1585,9 +1622,16 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 variant="fullFace"
                 sizeClass="h-6 w-6"
               />
-              <span className="text-xs font-medium text-[var(--todo-text)] break-words leading-snug">
-                {duplicateTodo.text}
-              </span>
+              <div className="min-w-0 flex-1">
+                <span className="block text-xs font-medium text-[var(--todo-text)] break-words leading-snug">
+                  {duplicateTodo.text}
+                </span>
+                {duplicateTodo.details?.trim() && (
+                  <p className="mt-1 text-[11px] text-[var(--todo-text-muted)] whitespace-pre-wrap break-words">
+                    {duplicateTodo.details.trim()}
+                  </p>
+                )}
+              </div>
             </div>
 
             <form
@@ -1597,6 +1641,7 @@ export const DaFareSubsection: React.FC<DaFareSubsectionProps> = ({
                 onDuplicateTodoToOrganize(
                   {
                     text: duplicateTodo.text,
+                    details: duplicateTodo.details,
                     emoji: duplicateTodo.emoji,
                     done: duplicateTodo.done,
                     source: duplicateTodo.source,

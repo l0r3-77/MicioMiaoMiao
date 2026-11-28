@@ -22,7 +22,6 @@ import {
   Send,
   Square,
   Trash2,
-  Undo2,
   X,
 } from 'lucide-react';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
@@ -83,8 +82,6 @@ interface OrganizzaSubsectionProps {
   organizeItems: OrganizeNoteItem[];
   sectionLayout: SectionLayoutState;
   focusTodaySignal?: number;
-  canUndo: boolean;
-  onUndo: () => void;
   onChangeLayout: (section: LayoutSectionKey, next: SectionLayoutState) => void;
   onResetLayout: (section: LayoutSectionKey) => void;
   onAddOrganizeItem: (item: OrganizeNoteItem) => void;
@@ -122,8 +119,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   organizeItems,
   sectionLayout,
   focusTodaySignal = 0,
-  canUndo,
-  onUndo,
   onChangeLayout,
   onResetLayout,
   onAddOrganizeItem,
@@ -154,6 +149,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   const [newModalDate, setNewModalDate] = useState<string>(todayIso);
   const [newModalPhase, setNewModalPhase] = useState<DayPhaseKey>('mattina');
   const [newModalText, setNewModalText] = useState('');
+  const [newModalDetails, setNewModalDetails] = useState('');
   const [manualNewCat, setManualNewCat] = useState<CatEmoticonId | null>(null);
   const [showNewCatPicker, setShowNewCatPicker] = useState(false);
   const [newModalError, setNewModalError] = useState<string | null>(null);
@@ -166,6 +162,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   // Compact Edit Existing Note Modal
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
   const [editDraftText, setEditDraftText] = useState('');
+  const [editDraftDetails, setEditDraftDetails] = useState('');
   const [editRemDate, setEditRemDate] = useState('');
   const [editRemTime, setEditRemTime] = useState('');
   const [showEditCatPicker, setShowEditCatPicker] = useState(false);
@@ -235,6 +232,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
   useEffect(() => {
     if (selectedOrgItem) {
       setEditDraftText(selectedOrgItem.text);
+      setEditDraftDetails(selectedOrgItem.details || '');
       setEditRemDate(selectedOrgItem.reminderDate || '');
       setEditRemTime(selectedOrgItem.reminderTime || '');
       setShowEditCatPicker(false);
@@ -460,6 +458,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     setNewModalDate(date);
     setNewModalPhase(phase);
     setNewModalText('');
+    setNewModalDetails('');
     setManualNewCat(null);
     setShowNewCatPicker(false);
     setNewModalRemDate('');
@@ -515,12 +514,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
     if (wasManual && manualNewCat) {
       learnCatIconAssociation(trimmed, manualNewCat);
     }
+    const cleanDetails = newModalDetails.trim();
     const itemId = crypto.randomUUID();
     const item: OrganizeNoteItem = {
       id: itemId,
       date: newModalDate,
       phase: newModalPhase,
       text: trimmed,
+      ...(cleanDetails ? { details: cleanDetails } : {}),
       emoji: chosenCat,
       color: 'none',
       done: false,
@@ -586,12 +587,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
       if (wasManual && manualNewCat) {
         learnCatIconAssociation(cleanText, manualNewCat);
       }
+      const cleanDetails = newModalDetails.trim();
       const itemId = crypto.randomUUID();
       const item: OrganizeNoteItem = {
         id: itemId,
         date: newModalDate,
         phase: newModalPhase,
         text: cleanText,
+        ...(cleanDetails ? { details: cleanDetails } : {}),
         emoji: chosenCat,
         color: 'none',
         done: false,
@@ -816,17 +819,6 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={onUndo}
-                disabled={!canUndo}
-                aria-label="Annulla ultima azione"
-                title="Annulla ultima azione"
-                className="min-h-[34px] w-[34px] inline-flex items-center justify-center rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface-alt)] text-[var(--todo-text)] hover:opacity-85 disabled:opacity-35 disabled:pointer-events-none transition-opacity"
-              >
-                <Undo2 className="h-3.5 w-3.5 text-[var(--todo-accent)]" aria-hidden="true" />
-              </button>
-
               <button
                 type="button"
                 onClick={() => {
@@ -1230,7 +1222,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                           <a
                                             href={buildGoogleCalendarUrl({
                                               title: item.text,
-                                              details: `${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text}`,
+                                              details: item.details?.trim()
+                                                ? `${item.details.trim()}\n\n(${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text})`
+                                                : `${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text}`,
                                               date: item.reminderDate!,
                                               time: item.reminderTime!,
                                             })}
@@ -1586,7 +1580,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                                         <a
                                           href={buildGoogleCalendarUrl({
                                             title: item.text,
-                                            details: `${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text}`,
+                                            details: item.details?.trim()
+                                              ? `${item.details.trim()}\n\n(${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text})`
+                                              : `${formatItalianDateShort(isoDate)} · ${phase.title}: ${item.text}`,
                                             date: item.reminderDate!,
                                             time: item.reminderTime!,
                                           })}
@@ -1833,6 +1829,14 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                         if (newModalError) setNewModalError(null);
                       }}
                       placeholder="Scrivi nota..."
+                      className="w-full rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] p-2 text-xs text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/60 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
+                    />
+                    <textarea
+                      rows={2}
+                      value={newModalDetails}
+                      onChange={(e) => setNewModalDetails(e.target.value)}
+                      placeholder="Testo aggiuntivo facoltativo (visibile solo aprendo la nota)..."
+                      aria-label="Testo aggiuntivo facoltativo"
                       className="w-full rounded-xl border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] p-2 text-xs text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/60 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
                     />
 
@@ -2100,6 +2104,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 e.preventDefault();
                 const clean = editDraftText.trim();
                 if (!clean) return;
+                const cleanDetails = editDraftDetails.trim() || undefined;
                 const oldAuto = inferCatEmoticonId(selectedOrgItem.text);
                 const currentResolved = resolveCatEmoticonId(
                   selectedOrgItem.emoji,
@@ -2110,6 +2115,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                   (currentResolved === oldAuto || currentResolved === 'cat_note');
                 onUpdateOrganizeItem(selectedOrgItem.id, {
                   text: clean,
+                  details: cleanDetails,
                   ...(shouldAutoUpdateIcon
                     ? { emoji: reconcileAutoCatEmoticonId(undefined, clean) }
                     : {}),
@@ -2120,19 +2126,32 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 setSelectedOrgId(null);
                 onNotify('Nota aggiornata');
               }}
-              className="flex gap-1.5"
+              className="space-y-1.5"
             >
               <input
                 type="text"
                 value={editDraftText}
                 onChange={(e) => setEditDraftText(e.target.value)}
-                className="flex-1 min-h-[34px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)] focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
+                aria-label="Titolo nota"
+                className="w-full min-h-[34px] rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] px-2.5 py-1 text-xs text-[var(--todo-text)] focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
               />
+              <label className="block">
+                <span className="block text-[10.5px] font-semibold text-[var(--todo-text-muted)] mb-1">
+                  Testo aggiuntivo (visibile solo aprendo la nota)
+                </span>
+                <textarea
+                  rows={3}
+                  value={editDraftDetails}
+                  onChange={(e) => setEditDraftDetails(e.target.value)}
+                  placeholder="Aggiungi dettagli, note o promemoria..."
+                  className="w-full rounded-lg border border-[var(--todo-chip-border)] bg-[var(--todo-surface)] px-2.5 py-1.5 text-xs text-[var(--todo-text)] placeholder:text-[var(--todo-text-muted)]/60 focus:border-[var(--todo-accent)] focus:bg-[var(--todo-card)] focus:outline-none"
+                />
+              </label>
               <button
                 type="submit"
-                className="min-h-[34px] rounded-lg bg-[var(--todo-accent-dark)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90 shrink-0"
+                className="w-full min-h-[34px] rounded-lg bg-[var(--todo-accent-dark)] px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90"
               >
-                Salva
+                Salva modifiche
               </button>
             </form>
 
@@ -2176,7 +2195,9 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 <a
                   href={buildGoogleCalendarUrl({
                     title: editDraftText.trim() || selectedOrgItem.text,
-                    details: `${formatItalianDateShort(selectedOrgItem.date)} · ${DAY_PHASE_MAP[selectedOrgItem.phase].title}: ${editDraftText.trim() || selectedOrgItem.text}`,
+                    details: editDraftDetails.trim()
+                      ? `${editDraftDetails.trim()}\n\n(${formatItalianDateShort(selectedOrgItem.date)} · ${DAY_PHASE_MAP[selectedOrgItem.phase].title}: ${editDraftText.trim() || selectedOrgItem.text})`
+                      : `${formatItalianDateShort(selectedOrgItem.date)} · ${DAY_PHASE_MAP[selectedOrgItem.phase].title}: ${editDraftText.trim() || selectedOrgItem.text}`,
                     date: editRemDate,
                     time: editRemTime,
                   })}
@@ -2187,6 +2208,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                     if (clean) {
                       onUpdateOrganizeItem(selectedOrgItem.id, {
                         text: clean,
+                        details: editDraftDetails.trim() || undefined,
                         reminderDate: editRemDate,
                         reminderTime: editRemTime,
                         updatedAt: new Date().toISOString(),
@@ -2421,9 +2443,16 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 variant="fullFace"
                 sizeClass="h-6 w-6"
               />
-              <span className="text-xs font-medium text-[var(--todo-text)] break-words leading-snug">
-                {duplicateOrgItem.text}
-              </span>
+              <div className="min-w-0 flex-1">
+                <span className="block text-xs font-medium text-[var(--todo-text)] break-words leading-snug">
+                  {duplicateOrgItem.text}
+                </span>
+                {duplicateOrgItem.details?.trim() && (
+                  <p className="mt-1 text-[11px] text-[var(--todo-text-muted)] whitespace-pre-wrap break-words">
+                    {duplicateOrgItem.details.trim()}
+                  </p>
+                )}
+              </div>
             </div>
 
             <form
@@ -2433,6 +2462,7 @@ export const OrganizzaSubsection: React.FC<OrganizzaSubsectionProps> = ({
                 onDuplicateOrganizeItem(
                   {
                     text: duplicateOrgItem.text,
+                    details: duplicateOrgItem.details,
                     emoji: duplicateOrgItem.emoji,
                     done: duplicateOrgItem.done,
                     source: duplicateOrgItem.source,

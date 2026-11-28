@@ -15,6 +15,22 @@ export function getCurrentTimeHHMM(): string {
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 }
 
+export function isNightOwlTime(hhmm?: string): boolean {
+  if (!hhmm || typeof hhmm !== 'string') return false;
+  const h = Number(hhmm.split(':')[0]);
+  return Number.isFinite(h) && h >= 0 && h < 5;
+}
+
+export function getAgendaDefaultDateISO(now: Date = new Date()): string {
+  const calendarToday = toISODate(now);
+  if (now.getHours() >= 0 && now.getHours() < 5) {
+    const prev = new Date(now);
+    prev.setDate(prev.getDate() - 1);
+    return toISODate(prev);
+  }
+  return calendarToday;
+}
+
 export function addDaysISO(isoDate: string, delta: number): string {
   const d = parseISODate(isoDate);
   d.setDate(d.getDate() + delta);

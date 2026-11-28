@@ -166,10 +166,15 @@ export function sanitizeTodoItems(raw: unknown): TodoNoteItem[] {
         typeof item.reminderTime === 'string' && /^\d{2}:\d{2}$/.test(item.reminderTime)
           ? item.reminderTime
           : undefined;
+      const details =
+        typeof item.details === 'string' && item.details.trim()
+          ? item.details.trim()
+          : undefined;
       return {
         id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : crypto.randomUUID(),
         block,
         text,
+        ...(details ? { details } : {}),
         emoji: resolveCatEmoticonId(
           typeof item.emoji === 'string' ? item.emoji.trim() : undefined,
           text,
@@ -204,6 +209,10 @@ export function sanitizeOrganizeItems(raw: unknown): OrganizeNoteItem[] {
         typeof item.reminderTime === 'string' && /^\d{2}:\d{2}$/.test(item.reminderTime)
           ? item.reminderTime
           : undefined;
+      const details =
+        typeof item.details === 'string' && item.details.trim()
+          ? item.details.trim()
+          : undefined;
       return {
         id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : crypto.randomUUID(),
         date:
@@ -212,6 +221,7 @@ export function sanitizeOrganizeItems(raw: unknown): OrganizeNoteItem[] {
             : today,
         phase: sanitizeDayPhaseKey(item.phase),
         text,
+        ...(details ? { details } : {}),
         emoji: resolveCatEmoticonId(
           typeof item.emoji === 'string' ? item.emoji.trim() : undefined,
           text

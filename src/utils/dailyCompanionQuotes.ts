@@ -492,59 +492,413 @@ export const DAILY_COMPANION_QUOTES: DailyCompanionQuote[] = [
     catKey: 'philosopher',
     themeLabel: 'Gattino filosofo',
   },
+
+  // --- Ulteriori citazioni & saggezza sui temi calma, presenza, respiro, piccoli passi ---
+  {
+    id: 'zen-kaze-yanagi',
+    text: 'Yanagi ni kaze — Come il salice al vento, cedere un momento all’onda evita di spezzarsi.',
+    author: 'Proverbio giapponese',
+    category: 'Proverbio Giapponese',
+    catKey: 'zen',
+    themeLabel: 'Gattino zen',
+  },
+  {
+    id: 'zen-chiri-tsumoreba',
+    text: 'Chiri mo tsumoreba yama to naru — Anche granelli minuscoli di calma, giorno dopo giorno, costruiscono montagne.',
+    author: 'Proverbio giapponese',
+    category: 'Proverbio Giapponese',
+    catKey: 'sprout',
+    themeLabel: 'Gattino giardiniere',
+  },
+  {
+    id: 'zen-kokoro-quiet',
+    text: 'Quando il cuore smette di rincorrere l’urgenza, vede subito ciò che conta davvero.',
+    author: 'Detto Zen',
+    category: 'Zen Giapponese',
+    catKey: 'zen',
+    themeLabel: 'Gattino zen',
+  },
+  {
+    id: 'zen-ma-space',
+    text: 'Ma — Nella tradizione giapponese la pausa tra due note non è silenzio vuoto: è ciò che rende armoniosa la musica.',
+    author: 'Estetica giapponese',
+    category: 'Zen Giapponese',
+    catKey: 'cozy',
+    themeLabel: 'Gattino tisana',
+  },
+  {
+    id: 'zen-shunryu-breath',
+    text: 'Ogni respiro è una porta aperta per tornare esattamente dove sei adesso.',
+    author: 'Ispirato a Shunryū Suzuki',
+    category: 'Zen Giapponese',
+    catKey: 'zen',
+    themeLabel: 'Gattino zen',
+  },
+  {
+    id: 'zen-ikigai-morning',
+    text: 'Non serve avere grandi risposte per iniziare bene: basta un piccolo motivo autentico per alzarsi con cura.',
+    author: 'Saggezza giapponese (Ikigai)',
+    category: 'Proverbio Giapponese',
+    catKey: 'calendar',
+    themeLabel: 'Gattino agenda',
+  },
+  {
+    id: 'zen-shinrin-trees',
+    text: 'Shinrin-yoku: anche pochi minuti all’aria aperta o vicino al verde abbassano il rumore della mente.',
+    author: 'Cultura giapponese',
+    category: 'Zen Giapponese',
+    catKey: 'sprout',
+    themeLabel: 'Gattino giardiniere',
+  },
+  {
+    id: 'zen-hachibunme',
+    text: 'Hara hachi bun me — Fermarsi un passo prima della saturazione lascia energia per tutto il resto della giornata.',
+    author: 'Proverbio giapponese',
+    category: 'Proverbio Giapponese',
+    catKey: 'cozy',
+    themeLabel: 'Gattino tisana',
+  },
+  {
+    id: 'zen-kumo-clouds',
+    text: 'I pensieri agitati somigliano alle nuvole: cambiano forma da soli se non ti metti a litigarci.',
+    author: 'Detto Zen',
+    category: 'Zen Giapponese',
+    catKey: 'stargazer',
+    themeLabel: 'Gattino astronomo',
+  },
+  {
+    id: 'zen-ichi-step',
+    text: 'Senza fretta ma senza fermarti: l’acqua lenta scava la pietra meglio della tempesta.',
+    author: 'Saggezza orientale',
+    category: 'Proverbio Giapponese',
+    catKey: 'sprout',
+    themeLabel: 'Gattino giardiniere',
+  },
+  {
+    id: 'zen-tea-hands',
+    text: 'Scaldati le mani sulla tazza prima di decidere cosa fare dopo: la calma migliora ogni scelta.',
+    author: 'Tradizione del tè',
+    category: 'Zen Giapponese',
+    catKey: 'cozy',
+    themeLabel: 'Gattino tisana',
+  },
+  {
+    id: 'seneca-anchor',
+    text: 'Soffriamo più spesso nell’immaginazione che nella realtà: torna ai fatti concreti dell’ora presente.',
+    author: 'Seneca',
+    category: 'Citazione',
+    catKey: 'philosopher',
+    themeLabel: 'Gattino filosofo',
+  },
+  {
+    id: 'aurelio-inner',
+    text: 'In qualunque momento puoi ritirarti dentro te stesso: nessun luogo è più quieto della propria mente pacificata.',
+    author: 'Marco Aurelio',
+    category: 'Citazione',
+    catKey: 'zen',
+    themeLabel: 'Gattino zen',
+  },
+  {
+    id: 'aurelio-obstacle',
+    text: 'Ciò che oggi ti rallenta può diventare la materia stessa del tuo prossimo passo avanti.',
+    author: 'Marco Aurelio',
+    category: 'Citazione',
+    catKey: 'philosopher',
+    themeLabel: 'Gattino filosofo',
+  },
+  {
+    id: 'kabat-wave',
+    text: 'Non puoi fermare le onde, ma puoi imparare a mantenere l’equilibrio mentre arrivano.',
+    author: 'Jon Kabat-Zinn',
+    category: 'Citazione',
+    catKey: 'zen',
+    themeLabel: 'Gattino zen',
+  },
+  {
+    id: 'thich-smile',
+    text: 'Qualche volta la tua calma è la fonte della tua gioia, e qualche volta un piccolo sorriso scioglie la tensione.',
+    author: 'Thich Nhat Hanh',
+    category: 'Zen Giapponese',
+    catKey: 'cozy',
+    themeLabel: 'Gattino tisana',
+  },
+  {
+    id: 'tolstoy-now',
+    text: 'Il momento più importante è sempre uno solo: quello che stai vivendo adesso.',
+    author: 'Lev Tolstoj',
+    category: 'Citazione',
+    catKey: 'calendar',
+    themeLabel: 'Gattino agenda',
+  },
+  {
+    id: 'emerson-walk',
+    text: 'Adotta il passo della natura: il suo segreto più grande è la pazienza.',
+    author: 'Ralph Waldo Emerson',
+    category: 'Citazione',
+    catKey: 'sprout',
+    themeLabel: 'Gattino giardiniere',
+  },
+  {
+    id: 'kafka-quiet',
+    text: 'Resta fermo ad ascoltare in silenzio, e la vita stessa ti mostrerà cosa ti serve.',
+    author: 'Ispirato a Franz Kafka',
+    category: 'Citazione',
+    catKey: 'stargazer',
+    themeLabel: 'Gattino astronomo',
+  },
+  {
+    id: 'camus-summer',
+    text: 'Nel mezzo dell’inverno ho imparato finalmente che c’era in me un’invincibile estate.',
+    author: 'Albert Camus',
+    category: 'Citazione',
+    catKey: 'stargazer',
+    themeLabel: 'Gattino astronomo',
+  },
+  {
+    id: 'persona-horizon',
+    text: 'Porta dentro di te un orizzonte aperto, anche quando la giornata ti chiede solo piccoli compiti.',
+    author: 'Ispirato a Fernando Pessoa',
+    category: 'Citazione',
+    catKey: 'stargazer',
+    themeLabel: 'Gattino astronomo',
+  },
+  {
+    id: 'didion-diary',
+    text: 'Tenere un diario è restare in contatto con chi eravamo, per ascoltare con tenerezza chi stiamo diventando.',
+    author: 'Ispirato a Joan Didion',
+    category: 'Citazione',
+    catKey: 'diary',
+    themeLabel: 'Gattino diario',
+  },
+  {
+    id: 'montessori-order',
+    text: 'Mettere un piccolo ordine attorno a sé aiuta subito anche i pensieri a ritrovare respiro.',
+    author: 'Ispirato a Maria Montessori',
+    category: 'Citazione',
+    catKey: 'calendar',
+    themeLabel: 'Gattino agenda',
+  },
+  {
+    id: 'leopardi-night',
+    text: 'Nel silenzio della sera i pensieri si distendono e diventano più sinceri e leggeri.',
+    author: 'Ispirato a Giacomo Leopardi',
+    category: 'Citazione',
+    catKey: 'stargazer',
+    themeLabel: 'Gattino astronomo',
+  },
+  {
+    id: 'rodari-words',
+    text: 'Le parole giuste, dette con calma, aprono strade che la stanchezza faceva sembrare chiuse.',
+    author: 'Ispirato a Gianni Rodari',
+    category: 'Citazione',
+    catKey: 'mic',
+    themeLabel: 'Gattino voce',
+  },
+  {
+    id: 'riflessione-respiro-3',
+    text: 'Tre respiri lenti prima di rispondere a un pensiero urgente cambiano quasi sempre la qualità della scelta.',
+    category: 'Riflessione',
+    catKey: 'zen',
+    themeLabel: 'Gattino zen',
+  },
+  {
+    id: 'riflessione-tensione-corpo',
+    text: 'Abbassa le spalle, lascia la mascella morbida: spesso il corpo trattiene ansia che la testa ha già superato.',
+    category: 'Riflessione',
+    catKey: 'cozy',
+    themeLabel: 'Gattino tisana',
+  },
+  {
+    id: 'aforisma-chiudere-giorno',
+    text: 'Non tutto va risolto prima di dormire: qualcosa ha solo bisogno di riposo e di una mattina nuova.',
+    category: 'Aforisma',
+    catKey: 'stargazer',
+    themeLabel: 'Gattino astronomo',
+  },
+  {
+    id: 'riflessione-ascolto-voce',
+    text: 'Parlare ad alta voce dei propri dubbi li toglie dal loop mentale e li trasforma in frasi osservabili.',
+    category: 'Riflessione',
+    catKey: 'mic',
+    themeLabel: 'Gattino voce',
+  },
+  {
+    id: 'aforisma-semplice',
+    text: 'Quando sei stanco, scegli la versione più semplice possibile della cosa giusta da fare.',
+    category: 'Aforisma',
+    catKey: 'calendar',
+    themeLabel: 'Gattino agenda',
+  },
+  {
+    id: 'riflessione-dati-non-colpe',
+    text: 'La stanchezza non è pigrizia: è un segnale prezioso che ti chiede ritmo umano e cura.',
+    category: 'Riflessione',
+    catKey: 'stats',
+    themeLabel: 'Gattino analista',
+  },
+  {
+    id: 'aforisma-gentilezza-errori',
+    text: 'Se oggi qualcosa è andato storto, riparti dal punto in cui sei senza sprecare energia nei rimproveri.',
+    category: 'Aforisma',
+    catKey: 'cozy',
+    themeLabel: 'Gattino tisana',
+  },
+  {
+    id: 'riflessione-piccoli-traguardi',
+    text: 'Anche aver portato a termine una sola cosa importante, in un giorno pesante, è una vittoria reale.',
+    category: 'Riflessione',
+    catKey: 'sprout',
+    themeLabel: 'Gattino giardiniere',
+  },
+  {
+    id: 'aforisma-focus-gentile',
+    text: 'La concentrazione non nasce dalla rigidità, ma dal togliere ciò che oggi non serve.',
+    category: 'Aforisma',
+    catKey: 'philosopher',
+    themeLabel: 'Gattino filosofo',
+  },
+  {
+    id: 'riflessione-scrittura-chiarezza',
+    text: 'Scrivere due righe sincere vale più di un’ora passata a rimuginare in silenzio.',
+    category: 'Riflessione',
+    catKey: 'diary',
+    themeLabel: 'Gattino diario',
+  },
+  {
+    id: 'aforisma-lentezza-buona',
+    text: 'Andare un po’ più piano oggi spesso ti evita di doverti fermare del tutto domani.',
+    category: 'Aforisma',
+    catKey: 'sprout',
+    themeLabel: 'Gattino giardiniere',
+  },
+  {
+    id: 'riflessione-confini',
+    text: 'Dire di no a qualcosa di superfluo è il modo più diretto per dire sì alla tua serenità.',
+    category: 'Riflessione',
+    catKey: 'zen',
+    themeLabel: 'Gattino zen',
+  },
+  {
+    id: 'aforisma-presenza-piccola',
+    text: 'La pace quotidiana non aspetta le vacanze: abita in dieci minuti tranquilli presi sul serio.',
+    category: 'Aforisma',
+    catKey: 'cozy',
+    themeLabel: 'Gattino tisana',
+  },
+  {
+    id: 'riflessione-emozioni-meteo',
+    text: 'Le emozioni sono come il meteo: puoi leggerle con attenzione senza credere che restino uguali per sempre.',
+    category: 'Riflessione',
+    catKey: 'stats',
+    themeLabel: 'Gattino analista',
+  },
+  {
+    id: 'aforisma-voce-sincera',
+    text: 'Non serve trovare subito parole eleganti: basta iniziare da ciò che senti davvero.',
+    category: 'Aforisma',
+    catKey: 'mic',
+    themeLabel: 'Gattino voce',
+  },
+  {
+    id: 'riflessione-domande-buone',
+    text: 'Farsi una buona domanda è già uscire dalla nebbia: lascia il tempo alla risposta di maturare.',
+    category: 'Riflessione',
+    catKey: 'philosopher',
+    themeLabel: 'Gattino filosofo',
+  },
 ];
 
-function daySeedFromISODate(isoDate: string): number {
-  const parts = isoDate.split('-').map(Number);
-  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
-    return 0;
+const QUOTE_DECK_STORAGE_KEY = 'miciomiao_quote_deck_v2';
+
+interface QuoteDeckState {
+  order: number[];
+  cursor: number;
+  lastQuoteIdx?: number;
+}
+
+function buildShuffledDeck(length: number, avoidFirstIdx?: number): number[] {
+  const arr = Array.from({ length }, (_, i) => i);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
   }
-  const [y, m, d] = parts;
-  return Math.abs(Math.floor(Date.UTC(y, m - 1, d) / 86400000));
+  if (avoidFirstIdx !== undefined && arr.length > 1 && arr[0] === avoidFirstIdx) {
+    const swapIdx = 1 + Math.floor(Math.random() * (arr.length - 1));
+    const tmp = arr[0];
+    arr[0] = arr[swapIdx];
+    arr[swapIdx] = tmp;
+  }
+  return arr;
 }
 
-const LAUNCH_QUOTE_STORAGE_KEY = 'miciomiao_quote_launch_counter_v1';
-
-export function getCompanionQuoteForDate(isoDate: string, extraOffset = 0): DailyCompanionQuote {
-  const len = DAILY_COMPANION_QUOTES.length;
-  // Use a coprime stride (+11, gcd(11, 60) = 1) so every launch and manual click varies quote, category, and cat
-  const step = extraOffset * 11;
-  const idx = (daySeedFromISODate(isoDate) + ((step % len) + len)) % len;
-  return DAILY_COMPANION_QUOTES[idx];
-}
-
-export function getInitialLaunchQuoteOffset(isoDate: string): number {
-  const len = DAILY_COMPANION_QUOTES.length;
+function loadDeckState(length: number): QuoteDeckState {
   try {
-    const raw = localStorage.getItem(LAUNCH_QUOTE_STORAGE_KEY);
-    let nextOffset = 0;
+    const raw = localStorage.getItem(QUOTE_DECK_STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as { date?: string; offset?: number };
-      if (typeof parsed.offset === 'number' && Number.isFinite(parsed.offset)) {
-        nextOffset = ((parsed.offset + 1) % len + len) % len;
+      const parsed = JSON.parse(raw) as Partial<QuoteDeckState>;
+      if (
+        Array.isArray(parsed.order) &&
+        parsed.order.length === length &&
+        parsed.order.every((n) => typeof n === 'number' && n >= 0 && n < length) &&
+        typeof parsed.cursor === 'number' &&
+        Number.isFinite(parsed.cursor)
+      ) {
+        return {
+          order: parsed.order,
+          cursor: Math.max(0, Math.min(length - 1, Math.floor(parsed.cursor))),
+          lastQuoteIdx:
+            typeof parsed.lastQuoteIdx === 'number' ? parsed.lastQuoteIdx : undefined,
+        };
       }
-    } else {
-      nextOffset = Math.floor(Math.random() * len);
     }
-    localStorage.setItem(
-      LAUNCH_QUOTE_STORAGE_KEY,
-      JSON.stringify({ date: isoDate, offset: nextOffset })
-    );
-    return nextOffset;
-  } catch {
-    return Math.floor(Math.random() * len);
-  }
-}
-
-export function saveManualQuoteOffset(isoDate: string, offset: number): void {
-  const len = DAILY_COMPANION_QUOTES.length;
-  try {
-    const normalized = ((offset % len) + len) % len;
-    localStorage.setItem(
-      LAUNCH_QUOTE_STORAGE_KEY,
-      JSON.stringify({ date: isoDate, offset: normalized })
-    );
   } catch {
     // ignore storage errors
   }
+  const initialOrder = buildShuffledDeck(length);
+  return { order: initialOrder, cursor: 0, lastQuoteIdx: initialOrder[0] };
+}
+
+function saveDeckState(state: QuoteDeckState): void {
+  try {
+    localStorage.setItem(QUOTE_DECK_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function stepDeckAndSave(delta: number): number {
+  const len = DAILY_COMPANION_QUOTES.length;
+  const state = loadDeckState(len);
+  const currentQuoteIdx = state.order[state.cursor] ?? 0;
+  let nextCursor = state.cursor + delta;
+  let nextOrder = state.order;
+
+  if (nextCursor >= len || nextCursor < 0) {
+    nextOrder = buildShuffledDeck(len, currentQuoteIdx);
+    nextCursor = 0;
+  }
+
+  const nextQuoteIdx = nextOrder[nextCursor] ?? 0;
+  saveDeckState({ order: nextOrder, cursor: nextCursor, lastQuoteIdx: nextQuoteIdx });
+  return nextQuoteIdx;
+}
+
+export function getCompanionQuoteForDate(_isoDate: string, extraOffset = 0): DailyCompanionQuote {
+  const len = DAILY_COMPANION_QUOTES.length;
+  const normalizedIdx = ((extraOffset % len) + len) % len;
+  return DAILY_COMPANION_QUOTES[normalizedIdx] || DAILY_COMPANION_QUOTES[0];
+}
+
+export function getInitialLaunchQuoteOffset(_isoDate: string): number {
+  return stepDeckAndSave(1);
+}
+
+export function getNextManualQuoteIndex(): number {
+  return stepDeckAndSave(1);
+}
+
+export function saveManualQuoteOffset(_isoDate: string, _offset: number): void {
+  // Kept for backwards compatibility; stepDeckAndSave handles persistence automatically.
 }

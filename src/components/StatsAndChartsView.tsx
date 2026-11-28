@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Activity,
   BarChart3,
   Clock,
   Download,
@@ -39,6 +40,12 @@ import {
   getValenceBackground,
   type ColorValence,
 } from '../utils/noteColors';
+import {
+  SENSATION_DIMENSIONS,
+  analyzeEntrySensationDimensions,
+  type EntryDimensionScores,
+  type SensationDimensionKey,
+} from '../utils/sensationDimensions';
 import { CHIBI_CAT_MASCOTS, getNekoForDate } from '../utils/nekoCatalog';
 import { CatIllustration } from './CatIllustration';
 import {
@@ -401,10 +408,19 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
   const [sensationToneFilter, setSensationToneFilter] = useState<SensationTone | 'all'>('all');
   const [selectedTimelineKey, setSelectedTimelineKey] = useState<string | null>(null);
   const [exportingState, setExportingState] = useState<string | null>(null);
+  const [activeDimensions, setActiveDimensions] = useState<Record<SensationDimensionKey, boolean>>({
+    umore: true,
+    energia_mentale: true,
+    energia_fisica: true,
+    stress: true,
+    ansia: true,
+  });
 
   const timelineChartRef = useRef<HTMLDivElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const valenceBarsScrollRef = useRef<HTMLDivElement | null>(null);
+  const fiveDimensionsChartRef = useRef<HTMLDivElement | null>(null);
+  const fiveDimScrollRef = useRef<HTMLDivElement | null>(null);
   const colorsChartRef = useRef<HTMLDivElement | null>(null);
   const hourlyChartRef = useRef<HTMLDivElement | null>(null);
 
@@ -1063,25 +1079,338 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     nonDateFilteredEntries,
   ]);
 
-  // Auto-scroll timeline horizontally to rightmost (current/most recent days) whenever filters or mode change
-  useEffect(() => {
-    if (periodFilter === 'single_day') return;
-    const scrollRight = () => {
-      if (timelineScrollRef.current) {
-        const el = timelineScrollRef.current;
-        if (el.scrollWidth > el.clientWidth) {
-          el.scrollLeft = el.scrollWidth - el.clientWidth;
+  // Analyze all non-date-filtered entries across the 5 sensation dimensions
+  const dimensionScoresByEntryId = useMemo(() => {
+    const map = new Map<string, EntryDimensionScores>();
+    for (const item of nonDateFilteredEntries) {
+      map.set(item.entry.id, analyzeEntrySensationDimensions(item.entry));
+    }
+    return map;
+  }, [nonDateFilteredEntries]);
+
+  const fiveDimensionsSummary = useMemo(() => {
+    const sums: Record<SensationDimensionKey, { sum: number; count: number }> = {
+      umore: { sum: 0, count: 0 },
+      energia_mentale: { sum: 0, count: 0 },
+      energia_fisica: { sum: 0, count: 0 },
+      stress: { sum: 0, count: 0 },
+      ansia: { sum: 0, count: 0 },
+    };
+    for (const item of flatEntries) {
+      const scores = dimensionScoresByEntryId.get(item.entry.id);
+      if (!scores) continue;
+      for (const dim of SENSATION_DIMENSIONS) {
+        const val = scores[dim.key];
+        if (typeof val === 'number') {
+          sums[dim.key].sum += val;
+          sums[dim.key].count += 1;
         }
       }
-      if (valenceBarsScrollRef.current) {
-        const el = valenceBarsScrollRef.current;
+    }
+    return SENSATION_DIMENSIONS.map((dim) => {
+      const st = sums[dim.key];
+      return {
+        ...dim,
+        count: st.count,
+        avgScore: st.count > 0 ? st.sum / st.count : null,
+      };
+    });
+  }, [flatEntries, dimensionScoresByEntryId]);
+
+  const fiveDimensionsGeometry = useMemo(() => {
+    const height = 224;
+    const padTop = 18;
+    const padBottom = 34;
+    const usableH = height - padTop - padBottom;
+    const scoreToY = (s: number) => padTop + ((2 - Math.max(-2, Math.min(2, s))) / 4) * usableH;
+
+    type DimPoint = {
+      x: number;
+      y: number;
+      score: number;
+      count: number;
+      label: string;
+      isBoundary?: boolean;
+    };
+
+    const buildSeriesSkeleton = () =>
+      SENSATION_DIMENSIONS.map((dim) => ({
+        meta: dim,
+        points: [] as DimPoint[],
+        pathPoints: [] as DimPoint[],
+        polyline: '',
+      }));
+
+    if (periodFilter === 'single_day') {
+      const plotWidth = 640;
+      const plotPadX = 16;
+      const plotPadRight = 18;
+      const usableW = plotWidth - plotPadX - plotPadRight;
+      const targetDay = singleDayDate || todayISO;
+      const targetMs = parseISODate(targetDay).getTime();
+      const MS_PER_DAY = 86400000;
+
+      const byTime = new Map<string, FlatEntry[]>();
+      for (const item of flatEntries) {
+        const timeKey = item.entry.time || `${String(item.hour).padStart(2, '0')}:00`;
+        const arr = byTime.get(timeKey) || [];
+        arr.push(item);
+        byTime.set(timeKey, arr);
+      }
+      const chronologicalSlots = Array.from(byTime.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([timeStr, items]) => {
+          const first = items[0];
+          return {
+            timeStr,
+            hourFloat: first.hour + first.minute / 60,
+            label: `${formatItalianDateShort(first.date)} · ${timeStr}`,
+            items,
+          };
+        });
+
+      const hourTicks = [0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => ({
+        x: plotPadX + (h / 24) * usableW,
+        label: h === 24 ? '24:00' : `${String(h).padStart(2, '0')}:00`,
+      }));
+
+      const beforeEntries = nonDateFilteredEntries.filter((e) => e.date < targetDay);
+      const afterEntries = nonDateFilteredEntries.filter((e) => e.date > targetDay);
+
+      const series = buildSeriesSkeleton().map((s) => {
+        const dimKey = s.meta.key;
+        const pts: DimPoint[] = [];
+
+        for (const slot of chronologicalSlots) {
+          const vals: number[] = [];
+          for (const item of slot.items) {
+            const v = dimensionScoresByEntryId.get(item.entry.id)?.[dimKey];
+            if (typeof v === 'number') vals.push(v);
+          }
+          if (vals.length === 0) continue;
+          const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+          const x = plotPadX + (Math.max(0, Math.min(24, slot.hourFloat)) / 24) * usableW;
+          pts.push({
+            x,
+            y: scoreToY(avg),
+            score: avg,
+            count: vals.length,
+            label: slot.label,
+          });
+        }
+
+        let pathPoints: DimPoint[] = [...pts];
+        if (pts.length > 0) {
+          const firstSlot = chronologicalSlots.find((slot) =>
+            slot.items.some((it) => typeof dimensionScoresByEntryId.get(it.entry.id)?.[dimKey] === 'number')
+          );
+          const lastSlot = [...chronologicalSlots]
+            .reverse()
+            .find((slot) =>
+              slot.items.some((it) => typeof dimensionScoresByEntryId.get(it.entry.id)?.[dimKey] === 'number')
+            );
+
+          const prevEntryWithDim = [...beforeEntries]
+            .reverse()
+            .find((e) => typeof dimensionScoresByEntryId.get(e.entry.id)?.[dimKey] === 'number');
+          const nextEntryWithDim = afterEntries.find(
+            (e) => typeof dimensionScoresByEntryId.get(e.entry.id)?.[dimKey] === 'number'
+          );
+
+          const firstScore = pts[0].score;
+          const lastScore = pts[pts.length - 1].score;
+          let startScore = firstScore;
+          if (prevEntryWithDim && firstSlot) {
+            const prevScore = dimensionScoresByEntryId.get(prevEntryWithDim.entry.id)![dimKey]!;
+            const prevDaysDiff = Math.max(
+              1,
+              Math.round((targetMs - parseISODate(prevEntryWithDim.date).getTime()) / MS_PER_DAY)
+            );
+            const prevHour = prevEntryWithDim.hour + prevEntryWithDim.minute / 60;
+            const dtBefore = Math.max(0.25, prevDaysDiff * 24 - prevHour);
+            const dtAfter = Math.max(0.25, firstSlot.hourFloat);
+            startScore = prevScore + (firstScore - prevScore) * (dtBefore / (dtBefore + dtAfter));
+          }
+
+          let endScore = lastScore;
+          if (nextEntryWithDim && lastSlot) {
+            const nextScore = dimensionScoresByEntryId.get(nextEntryWithDim.entry.id)![dimKey]!;
+            const nextDaysDiff = Math.max(
+              1,
+              Math.round((parseISODate(nextEntryWithDim.date).getTime() - targetMs) / MS_PER_DAY)
+            );
+            const nextHour = nextEntryWithDim.hour + nextEntryWithDim.minute / 60;
+            const dtBefore = Math.max(0.25, 24 - lastSlot.hourFloat);
+            const dtAfter = Math.max(0.25, (nextDaysDiff - 1) * 24 + nextHour);
+            endScore = lastScore + (nextScore - lastScore) * (dtBefore / (dtBefore + dtAfter));
+          }
+
+          pathPoints = [
+            {
+              x: plotPadX,
+              y: scoreToY(startScore),
+              score: startScore,
+              count: 0,
+              label: '00:00',
+              isBoundary: true,
+            },
+            ...pts,
+            {
+              x: plotPadX + usableW,
+              y: scoreToY(endScore),
+              score: endScore,
+              count: 0,
+              label: '24:00',
+              isBoundary: true,
+            },
+          ];
+        }
+
+        const polyline = pathPoints
+          .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+          .join(' ');
+        return { ...s, points: pts, pathPoints, polyline };
+      });
+
+      const lastHour =
+        chronologicalSlots.length > 0
+          ? chronologicalSlots[chronologicalSlots.length - 1].hourFloat
+          : 24;
+      const focusTargetX = plotPadX + (Math.max(0, Math.min(24, lastHour)) / 24) * usableW;
+
+      return {
+        plotWidth,
+        height,
+        plotPadX,
+        plotPadRight,
+        scoreToY,
+        xTicks: hourTicks,
+        series,
+        focusTargetX,
+        hasAnyPoint: series.some((s) => s.points.length > 0),
+      };
+    }
+
+    const totalDays = timelineBuckets.length;
+    const plotWidth = Math.max(520, totalDays * 38);
+    const plotPadX = 18;
+    const plotPadRight = 18;
+    const usableW = plotWidth - plotPadX - plotPadRight;
+    const denom = Math.max(1, totalDays - 1);
+
+    const byDate = new Map<string, FlatEntry[]>();
+    for (const item of flatEntries) {
+      const arr = byDate.get(item.date) || [];
+      arr.push(item);
+      byDate.set(item.date, arr);
+    }
+
+    const series = buildSeriesSkeleton().map((s) => {
+      const dimKey = s.meta.key;
+      const pts: DimPoint[] = [];
+
+      timelineBuckets.forEach((bucket, idx) => {
+        const dayItems = byDate.get(bucket.date) || [];
+        if (dayItems.length === 0) return;
+        const vals: number[] = [];
+        for (const item of dayItems) {
+          const v = dimensionScoresByEntryId.get(item.entry.id)?.[dimKey];
+          if (typeof v === 'number') vals.push(v);
+        }
+        if (vals.length === 0) return;
+        const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const x = totalDays === 1 ? plotPadX + usableW / 2 : plotPadX + (idx / denom) * usableW;
+        pts.push({
+          x,
+          y: scoreToY(avg),
+          score: avg,
+          count: vals.length,
+          label: bucket.shortLabel,
+        });
+      });
+
+      const polyline = pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      return { ...s, points: pts, pathPoints: pts, polyline };
+    });
+
+    const xTicks: Array<{ x: number; label: string }> = [];
+    if (totalDays > 0) {
+      if (totalDays === 1) {
+        xTicks.push({ x: plotPadX + usableW / 2, label: timelineBuckets[0].axisLabel });
+      } else {
+        const tickStep = totalDays <= 14 ? 1 : totalDays <= 35 ? 3 : 5;
+        for (let idx = 0; idx < totalDays; idx++) {
+          if (idx === 0 || idx === totalDays - 1 || idx % tickStep === 0) {
+            if (idx !== totalDays - 1 && totalDays - 1 - idx < Math.max(1, Math.floor(tickStep / 2))) {
+              continue;
+            }
+            xTicks.push({
+              x: plotPadX + (idx / denom) * usableW,
+              label: timelineBuckets[idx].axisLabel,
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      plotWidth,
+      height,
+      plotPadX,
+      plotPadRight,
+      scoreToY,
+      xTicks,
+      series,
+      focusTargetX: plotWidth,
+      hasAnyPoint: series.some((s) => s.points.length > 0),
+    };
+  }, [
+    periodFilter,
+    singleDayDate,
+    todayISO,
+    flatEntries,
+    timelineBuckets,
+    nonDateFilteredEntries,
+    dimensionScoresByEntryId,
+  ]);
+
+  // Auto-scroll timeline horizontally to rightmost (current/most recent days or latest hours) whenever filters or mode change
+  useEffect(() => {
+    const scrollChartsToLatest = () => {
+      if (periodFilter !== 'single_day') {
+        if (timelineScrollRef.current) {
+          const el = timelineScrollRef.current;
+          if (el.scrollWidth > el.clientWidth) {
+            el.scrollLeft = el.scrollWidth - el.clientWidth;
+          }
+        }
+        if (valenceBarsScrollRef.current) {
+          const el = valenceBarsScrollRef.current;
+          if (el.scrollWidth > el.clientWidth) {
+            el.scrollLeft = el.scrollWidth - el.clientWidth;
+          }
+        }
+      }
+      if (fiveDimScrollRef.current) {
+        const el = fiveDimScrollRef.current;
         if (el.scrollWidth > el.clientWidth) {
-          el.scrollLeft = el.scrollWidth - el.clientWidth;
+          if (periodFilter === 'single_day') {
+            const targetPx = Math.max(
+              0,
+              Math.min(
+                el.scrollWidth - el.clientWidth,
+                fiveDimensionsGeometry.focusTargetX - el.clientWidth + 44
+              )
+            );
+            el.scrollLeft = targetPx;
+          } else {
+            el.scrollLeft = el.scrollWidth - el.clientWidth;
+          }
         }
       }
     };
-    const rafId = window.requestAnimationFrame(scrollRight);
-    const tId = window.setTimeout(scrollRight, 80);
+    const rafId = window.requestAnimationFrame(scrollChartsToLatest);
+    const tId = window.setTimeout(scrollChartsToLatest, 80);
     return () => {
       window.cancelAnimationFrame(rafId);
       window.clearTimeout(tId);
@@ -1093,6 +1422,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
     flatEntries.length,
     dateRange.start,
     dateRange.end,
+    fiveDimensionsGeometry.focusTargetX,
   ]);
 
   // Sensations analytics: unified similar phrases, grouped by area, ordered +2 to -2 vertically
@@ -1289,6 +1619,7 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
       filteredNotes: filteredNoteRows,
       chartSvgContainers: [
         { title: 'Andamento nel periodo', element: timelineChartRef.current },
+        { title: 'Andamento 5 sensazioni nel tempo', element: fiveDimensionsChartRef.current },
         { title: 'Distribuzione valenza (+2 a -2)', element: colorsChartRef.current },
         { title: 'Orari e fasce', element: hourlyChartRef.current },
       ],
@@ -1881,6 +2212,348 @@ export const StatsAndChartsView: React.FC<StatsAndChartsViewProps> = ({
           )}
         </section>
       ),
+    },
+    {
+      id: 'stats_five_dimensions',
+      render: () => {
+        const activeCount = SENSATION_DIMENSIONS.filter((d) => activeDimensions[d.key]).length;
+        return (
+          <section
+            ref={fiveDimensionsChartRef}
+            className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-4 sm:p-5 shadow-xs"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-bold text-[var(--app-text)]">
+                  <Activity className="h-4 w-4 text-[var(--app-accent-text)]" aria-hidden="true" />
+                  Andamento 5 sensazioni nel tempo ({dateRange.label})
+                </h3>
+                <p className="text-[11px] sm:text-xs text-[var(--app-text-muted)] mt-0.5">
+                  Valutazione da testo e sintesi (+2 stato migliore · -2 carico critico)
+                </p>
+              </div>
+              {activeCount < 5 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setActiveDimensions({
+                      umore: true,
+                      energia_mentale: true,
+                      energia_fisica: true,
+                      stress: true,
+                      ansia: true,
+                    })
+                  }
+                  className="min-h-[28px] rounded-lg border border-[var(--app-border)] bg-[var(--app-card-alt)] px-2.5 py-1 text-[11px] font-semibold text-[var(--app-text)] hover:border-[var(--app-accent-soft-border)] transition-colors whitespace-nowrap"
+                >
+                  Mostra tutte (5)
+                </button>
+              )}
+            </div>
+
+            {/* 5 In-Block Dimension Filter Toggles */}
+            <div
+              role="group"
+              aria-label="Filtra le 5 sensazioni sul grafico"
+              className="mt-3 flex flex-wrap items-center gap-1.5"
+            >
+              {fiveDimensionsSummary.map((dim) => {
+                const isActive = activeDimensions[dim.key];
+                return (
+                  <button
+                    key={dim.key}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() =>
+                      setActiveDimensions((prev) => ({
+                        ...prev,
+                        [dim.key]: !prev[dim.key],
+                      }))
+                    }
+                    title={`${dim.label} (${dim.scaleHint})`}
+                    className={`min-h-[30px] inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all ${
+                      isActive
+                        ? 'border-[var(--app-accent-soft-border)] bg-[var(--app-card-alt)] text-[var(--app-text)] shadow-2xs'
+                        : 'border-[var(--app-border)] bg-[var(--app-card)] text-[var(--app-text-subtle)] opacity-55 hover:opacity-85'
+                    }`}
+                  >
+                    <span
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{
+                        backgroundColor: isActive ? dim.color : 'transparent',
+                        border: `2px solid ${dim.color}`,
+                      }}
+                      aria-hidden="true"
+                    />
+                    <span>{dim.label}</span>
+                    {dim.avgScore !== null && (
+                      <span className="font-mono text-[10px] text-[var(--app-text-muted)] tabular-nums">
+                        {dim.avgScore > 0 ? '+' : ''}
+                        {dim.avgScore.toFixed(1)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-4">
+              {!fiveDimensionsGeometry.hasAnyPoint || activeCount === 0 ? (
+                <p className="py-8 text-center text-xs text-[var(--app-text-muted)]">
+                  {activeCount === 0
+                    ? 'Seleziona almeno una delle 5 sensazioni sopra per visualizzare la linea.'
+                    : 'Servono appunti con descrizioni o sensazioni nel periodo per tracciare le linee.'}
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-stretch">
+                    {/* Fixed Non-Scrolling Y-Axis (+2 to -2 with red/anthracite split on -2) */}
+                    <div className="shrink-0 w-[44px] border-r border-[var(--app-divider)]/60 bg-[var(--app-card)] z-10">
+                      <svg
+                        width="44"
+                        height={fiveDimensionsGeometry.height}
+                        viewBox={`0 0 44 ${fiveDimensionsGeometry.height}`}
+                        className="block"
+                        aria-hidden="true"
+                      >
+                        <defs>
+                          <linearGradient id="negSplitAxisGrad5" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="50%" stopColor="#EF4444" />
+                            <stop offset="50%" stopColor="#3F3F46" />
+                          </linearGradient>
+                        </defs>
+                        {[
+                          { val: '+2', s: 2, textCol: '#0284C7', fill: '#0EA5E9' },
+                          { val: '+1', s: 1, textCol: '#0EA5E9', fill: '#7DD3FC' },
+                          { val: '0', s: 0, textCol: '#D97706', fill: '#F59E0B' },
+                          { val: '-1', s: -1, textCol: '#E11D48', fill: '#FB7185' },
+                          { val: '-2', s: -2, textCol: '#DC2626', fill: 'url(#negSplitAxisGrad5)' },
+                        ].map((ref) => {
+                          const ry = fiveDimensionsGeometry.scoreToY(ref.s);
+                          return (
+                            <g key={ref.val}>
+                              <circle cx="9" cy={ry} r="4" fill={ref.fill} />
+                              <text
+                                x="39"
+                                y={ry + 3.5}
+                                textAnchor="end"
+                                fontSize="10.5"
+                                fontWeight="600"
+                                fill={ref.textCol}
+                                fontFamily="monospace"
+                              >
+                                {ref.val}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+
+                    {/* Horizontally Scrollable 5-Dimension Plot */}
+                    <div ref={fiveDimScrollRef} className="flex-1 min-w-0 overflow-x-auto">
+                      <svg
+                        width={fiveDimensionsGeometry.plotWidth}
+                        height={fiveDimensionsGeometry.height}
+                        viewBox={`0 0 ${fiveDimensionsGeometry.plotWidth} ${fiveDimensionsGeometry.height}`}
+                        className="block"
+                        role="img"
+                        aria-label="Grafico a linee dell'andamento di umore, energia mentale, energia fisica, stress e ansia"
+                      >
+                        {[2, 1, 0, -1, -2].map((s) => {
+                          const ry = fiveDimensionsGeometry.scoreToY(s);
+                          return (
+                            <line
+                              key={s}
+                              x1={fiveDimensionsGeometry.plotPadX}
+                              y1={ry}
+                              x2={fiveDimensionsGeometry.plotWidth - fiveDimensionsGeometry.plotPadRight}
+                              y2={ry}
+                              stroke={s === 0 ? 'var(--app-border)' : 'var(--app-divider)'}
+                              strokeDasharray={s === 0 ? '4 2' : '3 3'}
+                            />
+                          );
+                        })}
+
+                        <line
+                          x1={fiveDimensionsGeometry.plotPadX}
+                          y1={fiveDimensionsGeometry.scoreToY(-2) + 8}
+                          x2={fiveDimensionsGeometry.plotWidth - fiveDimensionsGeometry.plotPadRight}
+                          y2={fiveDimensionsGeometry.scoreToY(-2) + 8}
+                          stroke="var(--app-divider)"
+                          strokeWidth="1"
+                        />
+
+                        {fiveDimensionsGeometry.xTicks.map((tick, idx) => (
+                          <g key={`dim-tick-${tick.label}-${idx}`}>
+                            <line
+                              x1={tick.x}
+                              y1={fiveDimensionsGeometry.scoreToY(2)}
+                              x2={tick.x}
+                              y2={fiveDimensionsGeometry.scoreToY(-2) + 8}
+                              stroke="var(--app-divider)"
+                              strokeOpacity="0.45"
+                              strokeWidth="1"
+                            />
+                            <text
+                              x={tick.x}
+                              y={fiveDimensionsGeometry.height - 8}
+                              textAnchor={
+                                idx === 0
+                                  ? 'start'
+                                  : idx === fiveDimensionsGeometry.xTicks.length - 1
+                                    ? 'end'
+                                    : 'middle'
+                              }
+                              fontSize="9.5"
+                              fill="var(--app-text-subtle)"
+                              fontFamily="monospace"
+                            >
+                              {tick.label}
+                            </text>
+                          </g>
+                        ))}
+
+                        {fiveDimensionsGeometry.series.map((s) => {
+                          if (!activeDimensions[s.meta.key] || s.points.length === 0) return null;
+                          return (
+                            <g key={s.meta.key}>
+                              {s.polyline && (
+                                <polyline
+                                  fill="none"
+                                  stroke={s.meta.color}
+                                  strokeWidth="2.2"
+                                  strokeOpacity="0.9"
+                                  strokeLinejoin="round"
+                                  strokeLinecap="round"
+                                  points={s.polyline}
+                                />
+                              )}
+                              {s.pathPoints
+                                .filter((pt) => pt.isBoundary)
+                                .map((bp, bIdx) => (
+                                  <circle
+                                    key={`${s.meta.key}-b-${bIdx}`}
+                                    cx={bp.x}
+                                    cy={bp.y}
+                                    r={2.5}
+                                    fill="var(--app-card)"
+                                    stroke={s.meta.color}
+                                    strokeWidth="1.4"
+                                  />
+                                ))}
+                              {s.points.map((pt, pIdx) => (
+                                <circle
+                                  key={`${s.meta.key}-p-${pIdx}`}
+                                  cx={pt.x}
+                                  cy={pt.y}
+                                  r={3.8}
+                                  fill={s.meta.color}
+                                  stroke="var(--app-card)"
+                                  strokeWidth="1.5"
+                                >
+                                  <title>
+                                    {`${s.meta.label} · ${pt.label}: ${pt.score > 0 ? '+' : ''}${pt.score.toFixed(2)} (${pt.count} ${pt.count === 1 ? 'nota' : 'note'})`}
+                                  </title>
+                                </circle>
+                              ))}
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </div>
+
+                  {/* Hidden combined SVG for PDF Export */}
+                  <svg
+                    data-export-chart="true"
+                    viewBox={`0 0 ${fiveDimensionsGeometry.plotWidth + 44} ${fiveDimensionsGeometry.height}`}
+                    className="sr-only"
+                    aria-hidden="true"
+                  >
+                    <defs>
+                      <linearGradient id="negSplitPdf5Grad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="50%" stopColor="#EF4444" />
+                        <stop offset="50%" stopColor="#3F3F46" />
+                      </linearGradient>
+                    </defs>
+                    {[
+                      { val: '+2', s: 2, col: '#0284C7', fill: '#0EA5E9' },
+                      { val: '+1', s: 1, col: '#0EA5E9', fill: '#7DD3FC' },
+                      { val: '0', s: 0, col: '#D97706', fill: '#F59E0B' },
+                      { val: '-1', s: -1, col: '#E11D48', fill: '#FB7185' },
+                      { val: '-2', s: -2, col: '#DC2626', fill: 'url(#negSplitPdf5Grad)' },
+                    ].map((ref) => {
+                      const ry = fiveDimensionsGeometry.scoreToY(ref.s);
+                      return (
+                        <g key={ref.val}>
+                          <circle cx="9" cy={ry} r="4" fill={ref.fill} />
+                          <text x="38" y={ry + 3.5} textAnchor="end" fontSize="10" fill={ref.col} fontFamily="monospace">
+                            {ref.val}
+                          </text>
+                          <line
+                            x1={44 + fiveDimensionsGeometry.plotPadX}
+                            y1={ry}
+                            x2={44 + fiveDimensionsGeometry.plotWidth - fiveDimensionsGeometry.plotPadRight}
+                            y2={ry}
+                            stroke="#E7E5E4"
+                            strokeDasharray="3 3"
+                          />
+                        </g>
+                      );
+                    })}
+                    {fiveDimensionsGeometry.xTicks.map((tick, idx) => (
+                      <text
+                        key={`pdf-dim-x-${idx}`}
+                        x={44 + tick.x}
+                        y={fiveDimensionsGeometry.height - 8}
+                        textAnchor="middle"
+                        fontSize="9.5"
+                        fill="#78716C"
+                        fontFamily="monospace"
+                      >
+                        {tick.label}
+                      </text>
+                    ))}
+                    {fiveDimensionsGeometry.series.map((s) => {
+                      if (!activeDimensions[s.meta.key] || s.points.length === 0) return null;
+                      return (
+                        <g key={`pdf-dim-${s.meta.key}`} transform="translate(44, 0)">
+                          {s.polyline && (
+                            <polyline
+                              fill="none"
+                              stroke={s.meta.color}
+                              strokeWidth="2.1"
+                              strokeLinejoin="round"
+                              strokeLinecap="round"
+                              points={s.polyline}
+                            />
+                          )}
+                          {s.points.map((pt, pIdx) => (
+                            <circle
+                              key={`pdf-dim-pt-${s.meta.key}-${pIdx}`}
+                              cx={pt.x}
+                              cy={pt.y}
+                              r={3.5}
+                              fill={s.meta.color}
+                              stroke="#FFFFFF"
+                              strokeWidth="1.2"
+                            />
+                          ))}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </>
+              )}
+            </div>
+
+            <p className="mt-2.5 border-t border-[var(--app-divider)] pt-2 text-[10.5px] text-[var(--app-text-subtle)] leading-snug">
+              Umore, Energia mentale &amp; fisica: +2 ottimo · -2 scarico/giù. Stress &amp; Ansia: +2 calmo/assente · -2 intenso/alto.
+            </p>
+          </section>
+        );
+      },
     },
     {
       id: 'stats_colors',

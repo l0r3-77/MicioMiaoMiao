@@ -35,6 +35,7 @@ export interface OrganizeExportDayRow {
     items: Array<{
       id: string;
       text: string;
+      details?: string;
       catEmoticonId: CatEmoticonId;
       done: boolean;
     }>;
@@ -103,6 +104,7 @@ export function buildOrganizeExportData(
           return {
             id: it.id,
             text: it.text,
+            ...(it.details ? { details: it.details } : {}),
             catEmoticonId: resolveCatEmoticonId(it.emoji, it.text),
             done: it.done,
           };

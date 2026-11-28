@@ -19,7 +19,7 @@ import type { NoteColor, NoteEntry } from '../types/note';
 import { fetchApiJsonWithRetry } from '../utils/apiError';
 import { deleteAudioClip, getAudioClip, saveAudioClip } from '../utils/audioStorage';
 import { startBackgroundSession } from '../utils/backgroundKeepAlive';
-import { formatDuration, getCurrentTimeHHMM } from '../utils/dateUtils';
+import { addDaysISO, formatDuration, getCurrentTimeHHMM, isNightOwlTime, toISODate } from '../utils/dateUtils';
 import {
   NOTE_COLOR_LIST,
   NOTE_COLORS,
@@ -85,6 +85,18 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
   const effectiveDate = useCurrentSelectionDate ? selectedDate : targetDate;
+  const calendarTodayISO = toISODate(new Date());
+  const activeTimeHHMM = targetTime || getCurrentTimeHHMM();
+  const isNightOwlNow = isNightOwlTime(activeTimeHHMM);
+  const resolvedEffectiveDate =
+    useCurrentSelectionDate && selectedDate === calendarTodayISO && isNightOwlNow
+      ? addDaysISO(calendarTodayISO, -1)
+      : effectiveDate;
+  const showNightOwlHint =
+    useCurrentSelectionDate &&
+    isNightOwlNow &&
+    (resolvedEffectiveDate === addDaysISO(calendarTodayISO, -1) ||
+      selectedDate === calendarTodayISO);
 
   const clearPendingBackupClip = async () => {
     try {
@@ -247,7 +259,7 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
 
       setPendingAudio(null);
       await clearPendingBackupClip();
-      onEntryCreated(effectiveDate, newEntry);
+      onEntryCreated(resolvedEffectiveDate, newEntry);
       setTargetTime(getCurrentTimeHHMM());
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') {
@@ -298,7 +310,7 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
     setPendingAudio(null);
     setApiError(null);
     await clearPendingBackupClip();
-    onEntryCreated(effectiveDate, newEntry);
+    onEntryCreated(resolvedEffectiveDate, newEntry);
     setTargetTime(getCurrentTimeHHMM());
   };
 
@@ -439,7 +451,7 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
       updatedAt: nowIso,
     };
 
-    onEntryCreated(effectiveDate, newEntry);
+    onEntryCreated(resolvedEffectiveDate, newEntry);
     setManualText('');
     setTargetTime(getCurrentTimeHHMM());
     if (synthesisNotice) {
@@ -449,7 +461,7 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
 
   const activeError = micError || apiError;
   const recorderCat =
-    inputMode === 'voice' ? CHIBI_CAT_MASCOTS.mic : getNekoForDate(effectiveDate, 1);
+    inputMode === 'voice' ? CHIBI_CAT_MASCOTS.mic : getNekoForDate(resolvedEffectiveDate, 1);
 
   return (
     <section
@@ -521,7 +533,7 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
           </span>
           <input
             type="date"
-            value={effectiveDate}
+            value={resolvedEffectiveDate}
             disabled={isRecording || isProcessing}
             onChange={(e) => {
               setUseCurrentSelectionDate(false);
@@ -529,6 +541,11 @@ export const VoiceRecorderPanel: React.FC<VoiceRecorderPanelProps> = ({
             }}
             className="appearance-none block w-full max-w-full min-w-0 box-border min-h-[42px] rounded-xl border border-[var(--app-border-soft)] bg-[var(--app-card-alt)] px-2.5 py-1.5 font-sans text-[var(--app-text)] tabular-nums focus:border-[var(--app-accent)] focus:bg-[var(--app-card)] focus:outline-none"
           />
+          {showNightOwlHint && (
+            <span className="mt-1 block text-[10.5px] leading-snug text-[var(--app-accent-text)]">
+              Dopo mezzanotte (00:00–04:59): incluso nel giorno precedente
+            </span>
+          )}
         </label>
 
         <label className="block min-w-0 max-w-full overflow-hidden">

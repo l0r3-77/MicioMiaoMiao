@@ -215,7 +215,7 @@ export async function buildBackupPayload(
       sezione: 'Da Fare',
       block: TODO_BLOCK_MAP[t.block]?.title || t.block,
       done: t.done,
-      text: t.text,
+      text: t.details ? `${t.text} (${t.details})` : t.text,
       updatedAt: t.updatedAt || t.createdAt,
     });
   }
@@ -225,7 +225,7 @@ export async function buildBackupPayload(
       date: o.date,
       phase: DAY_PHASE_MAP[o.phase]?.title || o.phase,
       done: o.done,
-      text: o.text,
+      text: o.details ? `${o.text} (${o.details})` : o.text,
       updatedAt: o.updatedAt || o.createdAt,
     });
   }

@@ -9,6 +9,7 @@ export interface TodoNoteItem {
   id: string;
   block: TodoBlockKey;
   text: string;
+  details?: string;
   emoji?: string;
   color: TaskHighlightColor;
   done: boolean;
@@ -26,6 +27,7 @@ export interface OrganizeNoteItem {
   date: string; // YYYY-MM-DD
   phase: DayPhaseKey;
   text: string;
+  details?: string;
   emoji?: string;
   color: TaskHighlightColor;
   done: boolean;

@@ -7,6 +7,7 @@ import {
   formatItalianDateShort,
   formatItalianMonthYear,
   formatItalianWeekdayShort,
+  getAgendaDefaultDateISO,
   getMonthCalendarCells,
   getWeekDaysISO,
   parseISODate,
@@ -237,7 +238,7 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
   onGenerateDailySummary,
   onCreateBlankEntry,
 }) => {
-  const todayISO = toISODate(new Date());
+  const todayISO = getAgendaDefaultDateISO();
   const weekStrip = getWeekDaysISO(selectedDate);
   const dailyNeko = getNekoForDate(selectedDate, 1);
   const dailyEmptyNeko = getNekoForDate(selectedDate, 4);
@@ -252,7 +253,10 @@ export const DailyAgendaView: React.FC<SharedAgendaProps> = ({
       id: 'daily_controls',
       render: () => (
         /* Compact Mode Tabs + Day Selector + 7-day strip + Zoom Block */
-        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3 sm:p-3.5 shadow-xs space-y-3">
+        <div
+          data-agenda-controls="true"
+          className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3 sm:p-3.5 shadow-xs space-y-3"
+        >
           <AgendaModeTabs agendaMode={agendaMode} onChangeAgendaMode={onChangeAgendaMode} />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -448,20 +452,25 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
   onTogglePinDay,
   onCreateBlankEntry,
 }) => {
-  const todayISO = toISODate(new Date());
+  const todayISO = getAgendaDefaultDateISO();
   const weekDays = getWeekDaysISO(selectedDate);
   const startLabel = formatItalianDateShort(weekDays[0]);
   const endLabel = formatItalianDateShort(weekDays[6]);
 
   const [zoomLevel, setZoomLevel] = usePersistedZoom('agendavoce_weekly_zoom_v1', defaultZoomLevel);
+  const weeklyStripScrollRef = useRef<HTMLDivElement | null>(null);
   const todayCardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      todayCardRef.current?.scrollIntoView({
+      const container = weeklyStripScrollRef.current;
+      const card = todayCardRef.current;
+      if (!container || !card) return;
+      const targetLeft =
+        card.offsetLeft - container.offsetLeft - (container.clientWidth - card.offsetWidth) / 2;
+      container.scrollTo({
+        left: Math.max(0, targetLeft),
         behavior: 'auto',
-        inline: 'center',
-        block: 'nearest',
       });
     }, 30);
     return () => window.clearTimeout(timer);
@@ -477,7 +486,10 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
     {
       id: 'weekly_controls',
       render: () => (
-        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3.5 sm:p-4 space-y-3 shadow-xs">
+        <div
+          data-agenda-controls="true"
+          className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3.5 sm:p-4 space-y-3 shadow-xs"
+        >
           <AgendaModeTabs agendaMode={agendaMode} onChangeAgendaMode={onChangeAgendaMode} />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
@@ -535,6 +547,7 @@ export const WeeklyAgendaView: React.FC<SharedAgendaProps> = ({
       render: () => (
         /* 7-Day Horizontally Scrollable Agenda with 3 selectable zoom levels */
         <div
+          ref={weeklyStripScrollRef}
           className={`flex flex-row overflow-x-auto snap-x snap-mandatory pb-3 ${
             zoomLevel === 'overview' ? 'gap-1.5 sm:gap-2' : 'gap-3'
           }`}
@@ -743,7 +756,7 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
   onGenerateDailySummary,
   onCreateBlankEntry,
 }) => {
-  const todayISO = toISODate(new Date());
+  const todayISO = getAgendaDefaultDateISO();
   const parsed = parseISODate(selectedDate);
   const year = parsed.getFullYear();
   const monthIndex = parsed.getMonth();
@@ -768,7 +781,10 @@ export const MonthlyAgendaView: React.FC<SharedAgendaProps> = ({
     {
       id: 'monthly_calendar',
       render: () => (
-        <div className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3.5 sm:p-5 shadow-xs">
+        <div
+          data-agenda-controls="true"
+          className="rounded-3xl border border-[var(--app-border)] bg-[var(--app-card)] p-3.5 sm:p-5 shadow-xs"
+        >
           <div className="mb-3">
             <AgendaModeTabs agendaMode={agendaMode} onChangeAgendaMode={onChangeAgendaMode} />
           </div>

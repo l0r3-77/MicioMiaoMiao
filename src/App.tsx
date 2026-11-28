@@ -48,7 +48,12 @@ import {
   writeAutoBackupToLinkedFile,
   type AgendaVoceBackupPayload,
 } from './utils/backupService';
-import { formatItalianDateShort, getCurrentTimeHHMM, toISODate } from './utils/dateUtils';
+import {
+  formatItalianDateShort,
+  getAgendaDefaultDateISO,
+  getCurrentTimeHHMM,
+  toISODate,
+} from './utils/dateUtils';
 import {
   createDefaultAllLayouts,
   createDefaultSectionLayout,
@@ -61,7 +66,7 @@ import {
 import {
   getCompanionQuoteForDate,
   getInitialLaunchQuoteOffset,
-  saveManualQuoteOffset,
+  getNextManualQuoteIndex,
 } from './utils/dailyCompanionQuotes';
 import { NOTE_COLOR_LIST, NOTE_COLORS, VALID_NOTE_COLORS } from './utils/noteColors';
 import { CHIBI_CAT_MASCOTS } from './utils/nekoCatalog';
@@ -276,7 +281,7 @@ export default function App() {
   const [todoItems, setTodoItems] = useState<TodoNoteItem[]>(loadTodoItems);
   const [organizeItems, setOrganizeItems] = useState<OrganizeNoteItem[]>(loadOrganizeItems);
 
-  const [selectedDate, setSelectedDate] = useState<string>(() => toISODate(new Date()));
+  const [selectedDate, setSelectedDate] = useState<string>(() => getAgendaDefaultDateISO());
   const [agendaMode, setAgendaMode] = useState<AgendaViewMode>('day');
   const [desktopSection, setDesktopSection] = useState<DesktopSection>(
     initialUrlParams.section === 'todo' ? 'todo' : 'day'
@@ -299,7 +304,7 @@ export default function App() {
     entry: NoteEntry;
   } | null>(null);
   const [quoteOffset, setQuoteOffset] = useState<number>(() =>
-    getInitialLaunchQuoteOffset(toISODate(new Date()))
+    getInitialLaunchQuoteOffset(getAgendaDefaultDateISO())
   );
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -364,12 +369,7 @@ export default function App() {
         const elapsedMs = Date.now() - hiddenAtRef.current;
         hiddenAtRef.current = null;
         if (elapsedMs >= 30000) {
-          const today = toISODate(new Date());
-          setQuoteOffset((prev) => {
-            const next = prev + 1;
-            saveManualQuoteOffset(today, next);
-            return next;
-          });
+          setQuoteOffset(getNextManualQuoteIndex());
         }
       }
     };
@@ -1036,12 +1036,27 @@ export default function App() {
 
   const selectDesktopAgendaMode = (mode: AgendaViewMode) => {
     if (mode === 'week') {
-      setSelectedDate(toISODate(new Date()));
+      setSelectedDate(getAgendaDefaultDateISO());
     }
     setAgendaMode(mode);
     setDesktopSection(mode);
     setMobileTab('agenda');
     setTodoSubMenuOpen(false);
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          const controlsEl = document.querySelector<HTMLElement>('[data-agenda-controls="true"]');
+          if (!controlsEl) return;
+          const headerEl = document.querySelector<HTMLElement>('header');
+          const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 56;
+          const rect = controlsEl.getBoundingClientRect();
+          if (rect.top < headerHeight + 4 || rect.top > window.innerHeight * 0.55) {
+            const targetTop = Math.max(0, window.scrollY + rect.top - headerHeight - 10);
+            window.scrollTo({ top: targetTop, behavior: 'auto' });
+          }
+        });
+      });
+    }
   };
 
   const swipeStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
@@ -1061,7 +1076,7 @@ export default function App() {
         setMobileTab('record');
       } else if (nextTab === 'agenda') {
         if (agendaMode === 'week') {
-          setSelectedDate(toISODate(new Date()));
+          setSelectedDate(getAgendaDefaultDateISO());
         }
         setMobileTab('agenda');
         if (
@@ -1200,13 +1215,7 @@ export default function App() {
             </div>
             <button
               type="button"
-              onClick={() =>
-                setQuoteOffset((prev) => {
-                  const next = prev + 1;
-                  saveManualQuoteOffset(selectedDate, next);
-                  return next;
-                })
-              }
+              onClick={() => setQuoteOffset(getNextManualQuoteIndex())}
               aria-label="Mostra un'altra frase del giorno"
               className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-[var(--app-accent-soft-border)] bg-[var(--app-card)] px-2.5 py-1 text-[11px] font-semibold text-[var(--app-text-muted)] hover:border-[var(--app-accent)] hover:text-[var(--app-text)] transition-colors whitespace-nowrap shrink-0"
             >
@@ -1865,7 +1874,7 @@ export default function App() {
             type="button"
             onClick={() => {
               if (mobileTab !== 'agenda' && agendaMode === 'week') {
-                setSelectedDate(toISODate(new Date()));
+                setSelectedDate(getAgendaDefaultDateISO());
               }
               setMobileTab('agenda');
               setTodoSubMenuOpen(false);
@@ -2050,7 +2059,9 @@ export default function App() {
       {toastMessage && (
         <div
           role="status"
-          className="fixed bottom-16 lg:bottom-6 right-4 z-40 rounded-xl bg-[var(--app-btn-bg)] px-4 py-2.5 text-xs font-medium text-[var(--app-btn-text)] shadow-lg"
+          className={`fixed right-4 z-40 rounded-xl bg-[var(--app-btn-bg)] px-4 py-2.5 text-xs font-medium text-[var(--app-btn-text)] shadow-lg ${
+            showTodoView ? 'bottom-[118px] lg:bottom-20' : 'bottom-16 lg:bottom-6'
+          }`}
         >
           {toastMessage}
         </div>
